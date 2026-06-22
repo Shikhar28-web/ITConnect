@@ -19,6 +19,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('agent-status', subscription);
     return () => ipcRenderer.removeListener('agent-status', subscription);
   },
+  onSetPrivacyMode: (callback) => {
+    const subscription = (_, enabled) => callback(enabled);
+    ipcRenderer.on('set-privacy-mode', subscription);
+    return () => ipcRenderer.removeListener('set-privacy-mode', subscription);
+  },
 
   // Remove listeners
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)

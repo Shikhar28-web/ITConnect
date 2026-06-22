@@ -33,7 +33,9 @@ console.log('Connecting to server:', SERVER_URL);
 
 let tray = null;
 let mainWindow = null;
-let blackoutWindow = null;
+let blackoutWindows = [];
+let privacyModeActive = false;
+let inputWorker = null;
 let signalRConnection = null;
 let deviceId = null;
 
@@ -56,6 +58,7 @@ function updateUiStatus(connected, message, sessionActive = undefined, engineerN
 
 // ─── App Ready ────────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
+  startInputWorker();
   createTray();
   createMainWindow();
   if (!tray) {
@@ -68,6 +71,10 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', (e) => {
   e.preventDefault(); // Keep running in background
+});
+
+app.on('quit', () => {
+  inputWorker?.kill();
 });
 
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
@@ -132,37 +139,81 @@ function createMainWindow() {
   });
 }
 
+// ─── Input Worker (Persistent PowerShell Session) ──────────────────────────────
+function startInputWorker() {
+  if (process.platform !== 'win32') return;
+
+  const initScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public class Win32Input {
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, uint dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, uint dwExtraInfo);
+
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    public const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+    public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+    public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
+    public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
+
+    public static void Move(int x, int y) {
+        SetCursorPos(x, y);
+    }
+
+    public static void Click(int x, int y, int button) {
+        SetCursorPos(x, y);
+        uint down = MOUSEEVENTF_LEFTDOWN;
+        uint up = MOUSEEVENTF_LEFTUP;
+        if (button == 2) {
+            down = MOUSEEVENTF_RIGHTDOWN;
+            up = MOUSEEVENTF_RIGHTUP;
+        } else if (button == 1) {
+            down = MOUSEEVENTF_MIDDLEDOWN;
+            up = MOUSEEVENTF_MIDDLEUP;
+        }
+        mouse_event(down, 0, 0, 0, 0);
+        System.Threading.Thread.Sleep(50);
+        mouse_event(up, 0, 0, 0, 0);
+    }
+}
+"@
+Add-Type -AssemblyName System.Windows.Forms
+
+while ($line = [Console]::ReadLine()) {
+    try {
+        if ($line -match '^move\\s+(\\d+)\\s+(\\d+)') {
+            [Win32Input]::Move([int]$Matches[1], [int]$Matches[2])
+        } elseif ($line -match '^click\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)') {
+            [Win32Input]::Click([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+        } elseif ($line -match '^key\\s+(.+)') {
+            [System.Windows.Forms.SendKeys]::SendWait($Matches[1])
+        }
+    } catch {
+        # ignore error
+    }
+}
+`;
+
+  inputWorker = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', '-']);
+  inputWorker.stdin.write(initScript + '\n');
+  
+  inputWorker.on('error', (err) => {
+    console.error('Input worker error:', err);
+  });
+}
+
 // ─── Blackout Overlay Window ──────────────────────────────────────────────────
 function createBlackoutWindow(progressInfo) {
-  const displays = screen.getAllDisplays();
-  const totalBounds = displays.reduce((acc, d) => ({
-    x: Math.min(acc.x, d.bounds.x),
-    y: Math.min(acc.y, d.bounds.y),
-    width: acc.width + d.bounds.width,
-    height: Math.max(acc.height, d.bounds.height)
-  }), { x: 0, y: 0, width: 0, height: 0 });
-
-  blackoutWindow = new BrowserWindow({
-    x: totalBounds.x,
-    y: totalBounds.y,
-    width: totalBounds.width,
-    height: totalBounds.height,
-    fullscreen: false,
-    alwaysOnTop: true,
-    frame: false,
-    skipTaskbar: true,
-    focusable: false,
-    transparent: false,
-    backgroundColor: '#000000',
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
-    }
-  });
-
-  blackoutWindow.setIgnoreMouseEvents(true);
-  blackoutWindow.setAlwaysOnTop(true, 'screen-saver');
+  destroyBlackoutWindow(); // Ensure previous ones are cleaned up
 
   const blackoutHtml = `
     <!DOCTYPE html>
@@ -221,7 +272,34 @@ function createBlackoutWindow(progressInfo) {
     </html>
   `;
 
-  blackoutWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
+  const displays = screen.getAllDisplays();
+  for (const d of displays) {
+    const win = new BrowserWindow({
+      x: d.bounds.x,
+      y: d.bounds.y,
+      width: d.bounds.width,
+      height: d.bounds.height,
+      fullscreen: true,
+      alwaysOnTop: true,
+      frame: false,
+      skipTaskbar: true,
+      focusable: false,
+      transparent: false,
+      backgroundColor: '#000000',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js')
+      }
+    });
+
+    win.setIgnoreMouseEvents(true);
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
+    win.show();
+    
+    blackoutWindows.push(win);
+  }
 
   // Block input on Windows
   if (process.platform === 'win32') {
@@ -234,10 +312,12 @@ function createBlackoutWindow(progressInfo) {
 }
 
 function destroyBlackoutWindow() {
-  if (blackoutWindow && !blackoutWindow.isDestroyed()) {
-    blackoutWindow.close();
-    blackoutWindow = null;
+  for (const win of blackoutWindows) {
+    if (win && !win.isDestroyed()) {
+      win.close();
+    }
   }
+  blackoutWindows = [];
 
   if (process.platform === 'win32') {
     try {
@@ -397,6 +477,11 @@ async function connectSignalR() {
     }
   });
 
+  signalRConnection.on('SetPrivacyMode', (enabled) => {
+    privacyModeActive = enabled;
+    mainWindow?.webContents.send('set-privacy-mode', enabled);
+  });
+
   signalRConnection.on('ClipboardSync', (text) => {
     require('electron').clipboard.writeText(text);
   });
@@ -464,28 +549,69 @@ async function connectSignalR() {
   }
 }
 
+function mapKeyToSendKeys(key) {
+  const specialKeys = {
+    'Enter': '{ENTER}',
+    'Tab': '{TAB}',
+    'Backspace': '{BACKSPACE}',
+    'Escape': '{ESC}',
+    'Insert': '{INSERT}',
+    'Delete': '{DEL}',
+    'Home': '{HOME}',
+    'End': '{END}',
+    'PageUp': '{PGUP}',
+    'PageDown': '{PGDN}',
+    'ArrowUp': '{UP}',
+    'ArrowDown': '{DOWN}',
+    'ArrowLeft': '{LEFT}',
+    'ArrowRight': '{RIGHT}',
+    'F1': '{F1}', 'F2': '{F2}', 'F3': '{F3}', 'F4': '{F4}', 'F5': '{F5}', 'F6': '{F6}',
+    'F7': '{F7}', 'F8': '{F8}', 'F9': '{F9}', 'F10': '{F10}', 'F11': '{F11}', 'F12': '{F12}',
+    'CapsLock': '{CAPSLOCK}',
+    'ScrollLock': '{SCROLLLOCK}',
+    'NumLock': '{NUMLOCK}',
+    'Help': '{HELP}',
+    'PrintScreen': '{PRTSC}',
+  };
+  return specialKeys[key] || key;
+}
+
 // ─── Mouse/Keyboard Injection ─────────────────────────────────────────────────
 async function injectMouseMove(x, y) {
-  if (process.platform === 'win32') {
-    exec(`powershell -Command "[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})"`);
+  if (privacyModeActive) return;
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write(`move ${x} ${y}\n`);
   }
 }
 
 async function injectMouseClick(x, y, button) {
-  if (process.platform === 'win32') {
-    const btnFlag = button === 2 ? 'MOUSEEVENTF_RIGHTDOWN,MOUSEEVENTF_RIGHTUP' : 'MOUSEEVENTF_LEFTDOWN,MOUSEEVENTF_LEFTUP';
-    exec(`powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = '${x},${y}'; [System.Windows.Forms.SendKeys]::SendWait(' ')"`);
+  if (privacyModeActive) return;
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write(`click ${x} ${y} ${button}\n`);
   }
 }
 
 async function injectKeyEvent(key, isDown, ctrl, alt, shift) {
-  if (process.platform === 'win32') {
-    let combo = '';
-    if (ctrl) combo += '^';
-    if (alt) combo += '%';
-    if (shift) combo += '+';
-    combo += key;
-    exec(`powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${combo}')"`);
+  if (privacyModeActive) return;
+  if (!isDown) return;
+  if (['control', 'shift', 'alt', 'meta'].includes(key.toLowerCase())) {
+    return; // Ignore modifier keys pressed on their own
+  }
+
+  let combo = '';
+  if (ctrl) combo += '^';
+  if (alt) combo += '%';
+  if (shift) combo += '+';
+
+  const mapped = mapKeyToSendKeys(key);
+  if (mapped.length === 1 && ['+', '^', '%', '~', '{', '}', '[', ']'].includes(mapped)) {
+    combo += `{${mapped}}`;
+  } else {
+    combo += mapped;
+  }
+
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write(`key ${combo}\n`);
   }
 }
 

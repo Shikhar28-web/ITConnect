@@ -94,8 +94,19 @@ function App() {
       }
     });
 
+    const unsubscribePrivacy = window.electronAPI.onSetPrivacyMode((enabled) => {
+      if (peerRef.current) {
+        peerRef.current.getSenders().forEach(sender => {
+          if (sender.track && sender.track.kind === 'video') {
+            sender.track.enabled = !enabled;
+          }
+        });
+      }
+    });
+
     return () => {
       if (unsubscribe) unsubscribe();
+      if (unsubscribePrivacy) unsubscribePrivacy();
       if (peerRef.current) peerRef.current.close();
     };
   }, []);

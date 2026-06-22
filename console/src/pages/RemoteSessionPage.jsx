@@ -185,6 +185,7 @@ function RemoteSessionPage() {
   const canvasRef = useRef(null);
   const isDrawing = useRef(false);
   const lastPos = useRef(null);
+  const lastMouseMoveTime = useRef(0);
 
   const initialized = useRef(false);
 
@@ -301,6 +302,10 @@ function RemoteSessionPage() {
   // Mouse/keyboard relay
   const handleMouseMove = useCallback(async (e) => {
     if (annotation || !connected) return;
+    const now = Date.now();
+    if (now - lastMouseMoveTime.current < 50) return; // Throttle to 20 events per second
+    lastMouseMoveTime.current = now;
+
     const rect = videoRef.current?.getBoundingClientRect();
     if (!rect) return;
     const x = Math.round(((e.clientX - rect.left) / rect.width) * (device?.metrics?.monitorCount === 1 ? 1920 : 1920));
