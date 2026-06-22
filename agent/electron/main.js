@@ -78,7 +78,11 @@ app.on('quit', () => {
 });
 
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  if (url.startsWith('https://localhost') || url.startsWith('https://127.0.0.1')) {
+  if (url.startsWith('https://localhost') || 
+      url.startsWith('https://127.0.0.1') || 
+      url.includes('192.168.') || 
+      url.includes('10.') || 
+      url.includes('172.')) {
     event.preventDefault();
     callback(true);
   } else {
@@ -181,7 +185,7 @@ public class Win32Input {
             up = MOUSEEVENTF_MIDDLEUP;
         }
         mouse_event(down, 0, 0, 0, 0);
-        System.Threading.Thread.Sleep(50);
+        System.Threading.Thread.Sleep(15);
         mouse_event(up, 0, 0, 0, 0);
     }
 }
@@ -190,12 +194,14 @@ Add-Type -AssemblyName System.Windows.Forms
 
 while ($line = [Console]::ReadLine()) {
     try {
-        if ($line -match '^move\\s+(\\d+)\\s+(\\d+)') {
-            [Win32Input]::Move([int]$Matches[1], [int]$Matches[2])
-        } elseif ($line -match '^click\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)') {
-            [Win32Input]::Click([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
-        } elseif ($line -match '^key\\s+(.+)') {
-            [System.Windows.Forms.SendKeys]::SendWait($Matches[1])
+        $parts = $line.Split(' ')
+        if ($parts[0] -eq 'm') {
+            [Win32Input]::Move([int]$parts[1], [int]$parts[2])
+        } elseif ($parts[0] -eq 'c') {
+            [Win32Input]::Click([int]$parts[1], [int]$parts[2], [int]$parts[3])
+        } elseif ($parts[0] -eq 'k') {
+            $keyStr = $line.Substring(2)
+            [System.Windows.Forms.SendKeys]::SendWait($keyStr)
         }
     } catch {
         # ignore error
@@ -477,10 +483,13 @@ async function connectSignalR() {
     }
   });
 
-  signalRConnection.on('SetPrivacyMode', (enabled) => {
+  const handleSetPrivacyMode = (enabled) => {
     privacyModeActive = enabled;
     mainWindow?.webContents.send('set-privacy-mode', enabled);
-  });
+  };
+  signalRConnection.on('SetPrivacyMode', handleSetPrivacyMode);
+  signalRConnection.on('setPrivacyMode', handleSetPrivacyMode);
+  signalRConnection.on('setprivacymode', handleSetPrivacyMode);
 
   signalRConnection.on('ClipboardSync', (text) => {
     require('electron').clipboard.writeText(text);
@@ -551,43 +560,43 @@ async function connectSignalR() {
 
 function mapKeyToSendKeys(key) {
   const specialKeys = {
-    'Enter': '{ENTER}',
-    'Tab': '{TAB}',
-    'Backspace': '{BACKSPACE}',
-    'Escape': '{ESC}',
-    'Insert': '{INSERT}',
-    'Delete': '{DEL}',
-    'Home': '{HOME}',
-    'End': '{END}',
-    'PageUp': '{PGUP}',
-    'PageDown': '{PGDN}',
-    'ArrowUp': '{UP}',
-    'ArrowDown': '{DOWN}',
-    'ArrowLeft': '{LEFT}',
-    'ArrowRight': '{RIGHT}',
-    'F1': '{F1}', 'F2': '{F2}', 'F3': '{F3}', 'F4': '{F4}', 'F5': '{F5}', 'F6': '{F6}',
-    'F7': '{F7}', 'F8': '{F8}', 'F9': '{F9}', 'F10': '{F10}', 'F11': '{F11}', 'F12': '{F12}',
-    'CapsLock': '{CAPSLOCK}',
-    'ScrollLock': '{SCROLLLOCK}',
-    'NumLock': '{NUMLOCK}',
-    'Help': '{HELP}',
-    'PrintScreen': '{PRTSC}',
+    'enter': '{ENTER}',
+    'tab': '{TAB}',
+    'backspace': '{BACKSPACE}',
+    'escape': '{ESC}',
+    'insert': '{INSERT}',
+    'delete': '{DEL}',
+    'home': '{HOME}',
+    'end': '{END}',
+    'pageup': '{PGUP}',
+    'pagedown': '{PGDN}',
+    'arrowup': '{UP}',
+    'arrowdown': '{DOWN}',
+    'arrowleft': '{LEFT}',
+    'arrowright': '{RIGHT}',
+    'f1': '{F1}', 'f2': '{F2}', 'f3': '{F3}', 'f4': '{F4}', 'f5': '{F5}', 'f6': '{F6}',
+    'f7': '{F7}', 'f8': '{F8}', 'f9': '{F9}', 'f10': '{F10}', 'f11': '{F11}', 'f12': '{F12}',
+    'capslock': '{CAPSLOCK}',
+    'scrolllock': '{SCROLLLOCK}',
+    'numlock': '{NUMLOCK}',
+    'help': '{HELP}',
+    'printscreen': '{PRTSC}',
   };
-  return specialKeys[key] || key;
+  return specialKeys[key.toLowerCase()] || key;
 }
 
 // ─── Mouse/Keyboard Injection ─────────────────────────────────────────────────
 async function injectMouseMove(x, y) {
   if (privacyModeActive) return;
   if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-    inputWorker.stdin.write(`move ${x} ${y}\n`);
+    inputWorker.stdin.write(`m ${x} ${y}\n`);
   }
 }
 
 async function injectMouseClick(x, y, button) {
   if (privacyModeActive) return;
   if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-    inputWorker.stdin.write(`click ${x} ${y} ${button}\n`);
+    inputWorker.stdin.write(`c ${x} ${y} ${button}\n`);
   }
 }
 
@@ -611,7 +620,7 @@ async function injectKeyEvent(key, isDown, ctrl, alt, shift) {
   }
 
   if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-    inputWorker.stdin.write(`key ${combo}\n`);
+    inputWorker.stdin.write(`k ${combo}\n`);
   }
 }
 

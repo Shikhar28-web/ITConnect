@@ -13,7 +13,11 @@ app.on('window-all-closed', () => {
 });
 
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  if (url.startsWith('https://localhost') || url.startsWith('https://127.0.0.1')) {
+  if (url.startsWith('https://localhost') || 
+      url.startsWith('https://127.0.0.1') || 
+      url.includes('192.168.') || 
+      url.includes('10.') || 
+      url.includes('172.')) {
     event.preventDefault();
     callback(true);
   } else {

@@ -44,6 +44,7 @@ function App() {
     });
 
     const peerRef = { current: null };
+    const privacyModeRef = { current: false };
 
     window.electronAPI.onWebRTCOffer(async ({ engineerConnId, sdp }) => {
       console.log('Received WebRTC offer', engineerConnId);
@@ -72,7 +73,12 @@ function App() {
           }
         });
         
-        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+        stream.getTracks().forEach(track => {
+          if (track.kind === 'video') {
+            track.enabled = !privacyModeRef.current;
+          }
+          pc.addTrack(track, stream);
+        });
 
         await pc.setRemoteDescription({ type: 'offer', sdp });
         const answer = await pc.createAnswer();
@@ -95,6 +101,7 @@ function App() {
     });
 
     const unsubscribePrivacy = window.electronAPI.onSetPrivacyMode((enabled) => {
+      privacyModeRef.current = enabled;
       if (peerRef.current) {
         peerRef.current.getSenders().forEach(sender => {
           if (sender.track && sender.track.kind === 'video') {
