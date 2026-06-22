@@ -46,6 +46,18 @@ npm run electron:dev     # Development
 npm run electron:build   # Build installer
 ```
 
+**Point the agent at your central API server** (do NOT run `dotnet run` on employee PCs):
+
+Edit `agent/config.json` and set your admin/server IP:
+
+```json
+{
+  "serverUrl": "http://192.168.1.100:5000"
+}
+```
+
+Or set the environment variable: `SERVER_URL=http://192.168.1.100:5000`
+
 The agent will:
 - Register itself with the server on startup
 - Run in system tray

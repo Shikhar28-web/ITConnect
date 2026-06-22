@@ -1,7 +1,5 @@
-using System.Text.Json;
-using ITComputer.Core.DTOs;
+using System.Security.Claims;
 using ITComputer.Core.Interfaces;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace ITComputer.API.Hubs;
@@ -9,34 +7,40 @@ namespace ITComputer.API.Hubs;
 /// <summary>
 /// Handles WebRTC signaling between the Admin Console and Remote Agent.
 /// Also handles screen control commands (mouse, keyboard, clipboard).
+/// Agents connect anonymously with ?deviceId=; engineers connect with JWT.
 /// </summary>
-[Authorize]
 public class RemoteControlHub : Hub
 {
     private readonly ISessionService _sessions;
-    private readonly IAuditService _audit;
+    private readonly IDeviceService _devices;
     private static readonly Dictionary<string, string> _deviceConnections = new();
     private static readonly Dictionary<string, string> _engineerConnections = new();
 
-    public RemoteControlHub(ISessionService sessions, IAuditService audit)
+    public RemoteControlHub(ISessionService sessions, IDeviceService devices)
     {
         _sessions = sessions;
-        _audit = audit;
+        _devices = devices;
     }
 
     public override async Task OnConnectedAsync()
     {
-        var userId = Context.User?.FindFirst("sub")?.Value ?? "anonymous";
-        var role = Context.User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        var deviceIdStr = Context.GetHttpContext()?.Request.Query["deviceId"].ToString();
 
-        if (role == "Agent")
+        if (!string.IsNullOrEmpty(deviceIdStr) && int.TryParse(deviceIdStr, out var deviceId))
         {
-            var deviceId = Context.GetHttpContext()?.Request.Query["deviceId"].ToString();
-            if (!string.IsNullOrEmpty(deviceId))
+            var device = await _devices.GetDeviceByIdAsync(deviceId);
+            if (device != null)
             {
-                _deviceConnections[deviceId] = Context.ConnectionId;
-                await Groups.AddToGroupAsync(Context.ConnectionId, $"device_{deviceId}");
+                _deviceConnections[deviceIdStr] = Context.ConnectionId;
+                await Groups.AddToGroupAsync(Context.ConnectionId, $"device_{deviceIdStr}");
+                await _devices.SetDeviceOnlineAsync(deviceId, Context.ConnectionId);
             }
+        }
+        else if (Context.User?.Identity?.IsAuthenticated == true)
+        {
+            var userId = Context.User.FindFirst("sub")?.Value;
+            if (userId != null)
+                _engineerConnections[userId] = Context.ConnectionId;
         }
 
         await base.OnConnectedAsync();
@@ -44,8 +48,13 @@ public class RemoteControlHub : Hub
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        var deviceId = _deviceConnections.FirstOrDefault(kv => kv.Value == Context.ConnectionId).Key;
-        if (deviceId != null) _deviceConnections.Remove(deviceId);
+        var deviceIdStr = _deviceConnections.FirstOrDefault(kv => kv.Value == Context.ConnectionId).Key;
+        if (deviceIdStr != null)
+        {
+            _deviceConnections.Remove(deviceIdStr);
+            if (int.TryParse(deviceIdStr, out var deviceId))
+                await _devices.SetDeviceOfflineAsync(deviceId);
+        }
 
         var engineerId = _engineerConnections.FirstOrDefault(kv => kv.Value == Context.ConnectionId).Key;
         if (engineerId != null) _engineerConnections.Remove(engineerId);
@@ -53,9 +62,20 @@ public class RemoteControlHub : Hub
         await base.OnDisconnectedAsync(exception);
     }
 
+    private void EnsureEngineer()
+    {
+        if (Context.User?.Identity?.IsAuthenticated != true)
+            throw new HubException("Unauthorized");
+
+        var role = Context.User.FindFirst(ClaimTypes.Role)?.Value;
+        if (role is not ("SuperAdmin" or "Admin" or "Engineer"))
+            throw new HubException("Unauthorized");
+    }
+
     /// <summary>Engineer → Agent: Send WebRTC offer</summary>
     public async Task SendOffer(string deviceId, string sdp)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
         {
             await Clients.Client(agentConnId).SendAsync("ReceiveOffer", Context.ConnectionId, sdp);
@@ -77,6 +97,7 @@ public class RemoteControlHub : Hub
     /// <summary>Engineer → Agent: Mouse move event</summary>
     public async Task SendMouseMove(string deviceId, int x, int y)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
             await Clients.Client(agentConnId).SendAsync("MouseMove", x, y);
     }
@@ -84,6 +105,7 @@ public class RemoteControlHub : Hub
     /// <summary>Engineer → Agent: Mouse click event</summary>
     public async Task SendMouseClick(string deviceId, int x, int y, int button)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
             await Clients.Client(agentConnId).SendAsync("MouseClick", x, y, button);
     }
@@ -91,6 +113,7 @@ public class RemoteControlHub : Hub
     /// <summary>Engineer → Agent: Keyboard event</summary>
     public async Task SendKeyEvent(string deviceId, string key, bool isDown, bool ctrl, bool alt, bool shift)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
             await Clients.Client(agentConnId).SendAsync("KeyEvent", key, isDown, ctrl, alt, shift);
     }
@@ -98,6 +121,7 @@ public class RemoteControlHub : Hub
     /// <summary>Engineer → Agent: Set blackout mode</summary>
     public async Task SetBlackout(string deviceId, int sessionId, bool enabled, string? progressInfo)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
         {
             await _sessions.SetBlackoutModeAsync(sessionId, enabled);
@@ -108,6 +132,7 @@ public class RemoteControlHub : Hub
     /// <summary>Engineer → Agent: Set privacy mode</summary>
     public async Task SetPrivacyMode(string deviceId, int sessionId, bool enabled)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
         {
             await _sessions.SetPrivacyModeAsync(sessionId, enabled);
@@ -118,6 +143,7 @@ public class RemoteControlHub : Hub
     /// <summary>Engineer → Agent: Clipboard sync</summary>
     public async Task SyncClipboard(string deviceId, string text)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
             await Clients.Client(agentConnId).SendAsync("ClipboardSync", text);
     }
@@ -131,6 +157,7 @@ public class RemoteControlHub : Hub
     /// <summary>Engineer → Agent: Execute remote command</summary>
     public async Task ExecuteCommand(string deviceId, int sessionId, string shell, string command)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
         {
             await _sessions.LogSessionEventAsync(sessionId, "CommandExecution",
@@ -148,6 +175,7 @@ public class RemoteControlHub : Hub
     /// <summary>Screen annotation relay</summary>
     public async Task SendAnnotation(string deviceId, string annotationJson)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
             await Clients.Client(agentConnId).SendAsync("ReceiveAnnotation", annotationJson);
     }
@@ -155,6 +183,7 @@ public class RemoteControlHub : Hub
     /// <summary>Remote reboot/shutdown command</summary>
     public async Task SendPowerCommand(string deviceId, int sessionId, string command)
     {
+        EnsureEngineer();
         // command: restart | shutdown | logoff | safemode
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
         {
@@ -166,6 +195,7 @@ public class RemoteControlHub : Hub
     /// <summary>Remote file explorer: list directory</summary>
     public async Task ListDirectory(string deviceId, string path)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
             await Clients.Client(agentConnId).SendAsync("ListDirectory", path, Context.ConnectionId);
     }
@@ -179,6 +209,7 @@ public class RemoteControlHub : Hub
     /// <summary>Process management: list processes</summary>
     public async Task GetProcessList(string deviceId)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
             await Clients.Client(agentConnId).SendAsync("GetProcessList", Context.ConnectionId);
     }
@@ -192,6 +223,7 @@ public class RemoteControlHub : Hub
     /// <summary>Kill remote process</summary>
     public async Task KillProcess(string deviceId, int pid)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
             await Clients.Client(agentConnId).SendAsync("KillProcess", pid);
     }
@@ -199,6 +231,7 @@ public class RemoteControlHub : Hub
     /// <summary>Registry: read key</summary>
     public async Task ReadRegistry(string deviceId, string keyPath)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
             await Clients.Client(agentConnId).SendAsync("ReadRegistry", keyPath, Context.ConnectionId);
     }
@@ -206,6 +239,7 @@ public class RemoteControlHub : Hub
     /// <summary>Registry: write value</summary>
     public async Task WriteRegistry(string deviceId, string keyPath, string valueName, string value, string valueType)
     {
+        EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
             await Clients.Client(agentConnId).SendAsync("WriteRegistry", keyPath, valueName, value, valueType);
     }

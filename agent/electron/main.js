@@ -6,8 +6,26 @@ const fs = require('fs');
 const { createServer } = require('http');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-const SERVER_URL = process.env.SERVER_URL || 'http://localhost:5000';
+function loadServerUrl() {
+  if (process.env.SERVER_URL) return process.env.SERVER_URL;
+
+  const configPath = path.join(__dirname, '../config.json');
+  if (fs.existsSync(configPath)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (config.serverUrl) return config.serverUrl;
+    } catch (e) {
+      console.warn('Failed to read config.json:', e.message);
+    }
+  }
+
+  return 'http://localhost:5000';
+}
+
+const SERVER_URL = loadServerUrl();
 const isDev = process.env.NODE_ENV === 'development';
+
+console.log('Connecting to server:', SERVER_URL);
 
 let tray = null;
 let mainWindow = null;
@@ -191,46 +209,66 @@ function destroyBlackoutWindow() {
 }
 
 // ─── Device Registration ──────────────────────────────────────────────────────
-async function registerDevice() {
-  try {
-    const networkInterfaces = os.networkInterfaces();
-    let mac = 'unknown';
-    let ip = '127.0.0.1';
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
-    for (const [name, nets] of Object.entries(networkInterfaces)) {
-      for (const net of nets || []) {
-        if (!net.internal && net.family === 'IPv4') {
-          ip = net.address;
-          mac = net.mac;
-          break;
+async function registerDevice() {
+  while (!deviceId) {
+    try {
+      const networkInterfaces = os.networkInterfaces();
+      let mac = 'unknown';
+      let ip = '127.0.0.1';
+
+      for (const [name, nets] of Object.entries(networkInterfaces)) {
+        for (const net of nets || []) {
+          if (!net.internal && net.family === 'IPv4') {
+            ip = net.address;
+            mac = net.mac;
+            break;
+          }
         }
       }
+
+      const osVersion = os.version ? os.version() : process.platform;
+      const response = await fetch(`${SERVER_URL}/api/devices/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hostname: os.hostname(),
+          ipAddress: ip,
+          macAddress: mac,
+          os: os.type() + ' ' + os.release(),
+          osVersion: osVersion,
+          agentVersion: app.getVersion()
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        deviceId = data.id;
+        console.log('Device registered with ID:', deviceId);
+        updateTrayStatus('Connected');
+        startMetricsReporter();
+        return;
+      }
+
+      console.error('Device registration failed:', response.status, await response.text());
+    } catch (err) {
+      console.error('Device registration failed:', err.message);
+      updateTrayStatus('Disconnected');
     }
 
-    const osVersion = os.version ? os.version() : process.platform;
-    const response = await fetch(`${SERVER_URL}/api/devices/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        hostname: os.hostname(),
-        ipAddress: ip,
-        macAddress: mac,
-        os: os.type() + ' ' + os.release(),
-        osVersion: osVersion,
-        agentVersion: app.getVersion()
-      })
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      deviceId = data.id;
-      console.log('Device registered with ID:', deviceId);
-      startMetricsReporter();
-    }
-  } catch (err) {
-    console.error('Device registration failed:', err);
-    setTimeout(registerDevice, 10000);
+    console.log('Retrying registration in 10 seconds...');
+    await sleep(10000);
   }
+}
+
+function updateTrayStatus(status) {
+  const menu = tray?.getContextMenu();
+  if (!menu) return;
+  const item = menu.getMenuItemById('status');
+  if (item) item.label = `Status: ${status}`;
 }
 
 // ─── Metrics Reporter ─────────────────────────────────────────────────────────
@@ -276,6 +314,11 @@ function getCPUUsage() {
 
 // ─── SignalR Connection ───────────────────────────────────────────────────────
 async function connectSignalR() {
+  if (!deviceId) {
+    console.warn('Cannot connect SignalR: device not registered yet');
+    return;
+  }
+
   const signalR = require('@microsoft/signalr');
 
   signalRConnection = new signalR.HubConnectionBuilder()
@@ -362,15 +405,22 @@ async function connectSignalR() {
   // ─── Connection lifecycle ─────────────────────────────────────────────────
   signalRConnection.onreconnected(() => {
     console.log('SignalR reconnected');
-    tray?.setToolTip('IT Support Agent - Connected');
+    updateTrayStatus('Connected');
   });
 
   signalRConnection.onclose(() => {
-    tray?.setToolTip('IT Support Agent - Disconnected');
+    updateTrayStatus('Disconnected');
   });
 
-  await signalRConnection.start();
-  console.log('SignalR connected');
+  try {
+    await signalRConnection.start();
+    console.log('SignalR connected');
+    updateTrayStatus('Connected');
+  } catch (err) {
+    console.error('SignalR connection failed:', err.message);
+    updateTrayStatus('Disconnected');
+    setTimeout(connectSignalR, 10000);
+  }
 }
 
 // ─── Mouse/Keyboard Injection ─────────────────────────────────────────────────
