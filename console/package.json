@@ -13,16 +13,20 @@
     "test": "react-scripts test"
   },
   "build": {
+    "extends": null,
     "appId": "com.company.itcomputer-console",
     "productName": "IT Support Console",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "build/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
     "win": {
       "target": "nsis",
-      "icon": "public/icon.ico",
       "requestedExecutionLevel": "requireAdministrator"
-    },
-    "mac": {
-      "target": "pkg",
-      "icon": "public/icon.icns"
     }
   },
   "dependencies": {
