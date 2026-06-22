@@ -195,7 +195,7 @@ public class WinAffinity {
     public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
     
     public static void Exclude(long hwnd) {
-        SetWindowDisplayAffinity((IntPtr)hwnd, 2); // WDA_EXCLUDEFROMCAPTURE = 2
+        SetWindowDisplayAffinity((IntPtr)hwnd, 17); // WDA_EXCLUDEFROMCAPTURE = 0x11 (17)
     }
 }
 "@
