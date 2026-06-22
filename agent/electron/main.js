@@ -58,12 +58,25 @@ function updateUiStatus(connected, message, sessionActive = undefined, engineerN
 app.whenReady().then(async () => {
   createTray();
   createMainWindow();
+  if (!tray) {
+    mainWindow?.show();
+    mainWindow?.setSkipTaskbar(false);
+  }
   await registerDevice();
   await connectSignalR();
 });
 
 app.on('window-all-closed', (e) => {
   e.preventDefault(); // Keep running in background
+});
+
+app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
+  if (url.startsWith('https://localhost') || url.startsWith('https://127.0.0.1')) {
+    event.preventDefault();
+    callback(true);
+  } else {
+    callback(false);
+  }
 });
 
 // ─── System Tray ─────────────────────────────────────────────────────────────
@@ -96,8 +109,8 @@ function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 480,
     height: 600,
-    show: false,
-    skipTaskbar: true,
+    show: isDev,
+    skipTaskbar: !isDev,
     frame: true,
     resizable: false,
     icon: path.join(__dirname, '../public/icon.png'),

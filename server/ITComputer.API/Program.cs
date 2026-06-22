@@ -86,10 +86,7 @@ builder.Services.AddSignalR(opts =>
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
-        policy.WithOrigins(
-                "http://localhost:3000",
-                "http://localhost:3001",
-                "app://.")  // Electron
+        policy.SetIsOriginAllowed(origin => true)
             .AllowAnyMethod()
             .AllowAnyHeader()
             .AllowCredentials());
