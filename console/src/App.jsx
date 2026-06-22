@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import './index.css';
@@ -63,7 +63,7 @@ function App() {
   }
 
   return (
-    <BrowserRouter>
+    <HashRouter>
       <div className="app-layout">
         <Sidebar user={user} unreadNotifs={unreadNotifs} />
         <div className="main-content">
@@ -95,7 +95,7 @@ function App() {
           color: '#e2e8f0'
         }}
       />
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 

@@ -27,7 +27,7 @@ function loadServerUrl() {
 }
 
 const SERVER_URL = loadServerUrl();
-const isDev = process.env.NODE_ENV === 'development';
+const isDev = !app.isPackaged;
 
 console.log('Connecting to server:', SERVER_URL);
 
@@ -322,13 +322,15 @@ function startMetricsReporter() {
       diskTotal: 0,
       cpuModel: os.cpus()[0]?.model || 'Unknown',
       logicalCores: os.cpus().length,
-      uptimeSeconds: os.uptime(),
+      uptimeSeconds: Math.floor(os.uptime()),
       monitorCount: screen.getAllDisplays().length
     };
 
     try {
       await axios.post(`${SERVER_URL}/api/devices/${deviceId}/metrics`, metrics);
-    } catch (e) { /* silent fail */ }
+    } catch (e) {
+      console.error('Metrics update failed:', e.response?.data || e.message);
+    }
   }, 30000); // Every 30 seconds
 }
 
