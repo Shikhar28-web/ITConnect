@@ -36,6 +36,23 @@ let blackoutWindow = null;
 let signalRConnection = null;
 let deviceId = null;
 
+// UI Status tracking
+let uiStatus = { connected: false, message: 'Connecting to server...', sessionActive: false, engineerName: '' };
+
+function updateUiStatus(connected, message, sessionActive = undefined, engineerName = '') {
+  uiStatus.connected = connected;
+  uiStatus.message = message;
+  if (sessionActive !== undefined) {
+    uiStatus.sessionActive = sessionActive;
+    uiStatus.engineerName = engineerName;
+  }
+  try {
+    mainWindow?.webContents.send('agent-status', uiStatus);
+  } catch (err) {
+    // Ignore if window is not ready/destroyed
+  }
+}
+
 // ─── App Ready ────────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   createTray();
@@ -219,6 +236,7 @@ function sleep(ms) {
 async function registerDevice() {
   while (!deviceId) {
     try {
+      updateUiStatus(false, 'Registering device...');
       const networkInterfaces = os.networkInterfaces();
       let mac = 'unknown';
       let ip = '127.0.0.1';
@@ -252,14 +270,17 @@ async function registerDevice() {
         deviceId = data.id;
         console.log('Device registered with ID:', deviceId);
         updateTrayStatus('Connected');
+        updateUiStatus(true, 'Registered. Connecting control channel...');
         startMetricsReporter();
         return;
       }
 
       console.error('Device registration failed:', response.status, await response.text());
+      updateUiStatus(false, `Registration failed (status ${response.status})`);
     } catch (err) {
       console.error('Device registration failed:', err.message);
       updateTrayStatus('Disconnected');
+      updateUiStatus(false, `Connection failed: ${err.message}`);
     }
 
     console.log('Retrying registration in 10 seconds...');
@@ -409,19 +430,24 @@ async function connectSignalR() {
   signalRConnection.onreconnected(() => {
     console.log('SignalR reconnected');
     updateTrayStatus('Connected');
+    updateUiStatus(true, 'Online & Ready');
   });
 
   signalRConnection.onclose(() => {
     updateTrayStatus('Disconnected');
+    updateUiStatus(false, 'Disconnected from control channel');
   });
 
   try {
+    updateUiStatus(true, 'Connecting control channel...');
     await signalRConnection.start();
     console.log('SignalR connected');
     updateTrayStatus('Connected');
+    updateUiStatus(true, 'Online & Ready');
   } catch (err) {
     console.error('SignalR connection failed:', err.message);
     updateTrayStatus('Disconnected');
+    updateUiStatus(false, `Control channel connection failed: ${err.message}`);
     setTimeout(connectSignalR, 10000);
   }
 }
@@ -540,3 +566,12 @@ ipcMain.handle('webrtc-ice', async (event, { targetConnId, candidate }) => {
 ipcMain.handle('clipboard-get', () => {
   return require('electron').clipboard.readText();
 });
+
+ipcMain.handle('get-server-url', () => {
+  return SERVER_URL;
+});
+
+ipcMain.handle('get-agent-status', () => {
+  return uiStatus;
+});
+

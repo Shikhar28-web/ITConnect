@@ -10,6 +10,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Clipboard
   getClipboard: () => ipcRenderer.invoke('clipboard-get'),
 
+  // Status & Config
+  getServerUrl: () => ipcRenderer.invoke('get-server-url'),
+  getAgentStatus: () => ipcRenderer.invoke('get-agent-status'),
+  onAgentStatus: (callback) => {
+    const subscription = (_, data) => callback(data);
+    ipcRenderer.on('agent-status', subscription);
+    return () => ipcRenderer.removeListener('agent-status', subscription);
+  },
+
   // Remove listeners
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)
 });
+

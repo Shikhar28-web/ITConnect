@@ -6,16 +6,46 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [sessionActive, setSessionActive] = useState(false);
   const [engineerName, setEngineerName] = useState('');
+  const [serverUrl, setServerUrl] = useState('Loading...');
+  const [isElectron, setIsElectron] = useState(true);
 
   useEffect(() => {
-    // Listen for status updates from main process
-    const handleStatusChange = (event) => {
-      setConnected(event.detail.connected);
-      setStatus(event.detail.message);
-    };
+    if (!window.electronAPI) {
+      setIsElectron(false);
+      setStatus('Agent must be run via the Electron app, not in a web browser.');
+      setConnected(false);
+      setServerUrl('N/A (Browser Mode)');
+      return;
+    }
 
-    window.addEventListener('agent-status', handleStatusChange);
-    return () => window.removeEventListener('agent-status', handleStatusChange);
+    // Get Server URL from Electron main process
+    window.electronAPI.getServerUrl().then(url => {
+      setServerUrl(url);
+    }).catch(() => {
+      setServerUrl('Unknown');
+    });
+
+    // Get initial status
+    window.electronAPI.getAgentStatus().then(data => {
+      setConnected(data.connected);
+      setStatus(data.message);
+      setSessionActive(data.sessionActive);
+      setEngineerName(data.engineerName || '');
+    }).catch(() => {});
+
+    // Listen for status updates from main process
+    const unsubscribe = window.electronAPI.onAgentStatus((data) => {
+      setConnected(data.connected);
+      setStatus(data.message);
+      if (data.sessionActive !== undefined) {
+        setSessionActive(data.sessionActive);
+        setEngineerName(data.engineerName || '');
+      }
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   return (
@@ -32,6 +62,25 @@ function App() {
       </div>
 
       <div className="agent-body">
+        {!isElectron && (
+          <div className="session-card active" style={{ borderColor: '#ef4444' }}>
+            <div className="session-icon">⚠️</div>
+            <div className="session-info">
+              <h4 style={{ color: '#f87171' }}>Browser Mode Detected</h4>
+              <p style={{ marginTop: 8 }}>
+                The agent's desktop capabilities (mouse/keyboard control, remote terminal, etc.) can only run inside the Electron shell.
+              </p>
+              <p style={{ marginTop: 8 }}>
+                Please run the agent executable or start it using:
+                <br />
+                <code style={{ background: '#222', padding: '2px 6px', borderRadius: 4, display: 'inline-block', marginTop: 4 }}>
+                  npm run electron:dev
+                </code>
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="info-card">
           <h3>Agent Status</h3>
           <p className="status-text">{status}</p>
@@ -55,7 +104,7 @@ function App() {
           </div>
           <div className="info-item">
             <span className="info-label">Server</span>
-            <span className="info-value">localhost:5000</span>
+            <span className="info-value" style={{ fontFamily: 'monospace' }}>{serverUrl}</span>
           </div>
         </div>
 
@@ -69,3 +118,4 @@ function App() {
 }
 
 export default App;
+
