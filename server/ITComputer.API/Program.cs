@@ -56,6 +56,19 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                     context.Token = accessToken;
                 }
                 return Task.CompletedTask;
+            },
+            OnTokenValidated = context =>
+            {
+                var claimsIdentity = context.Principal?.Identity as System.Security.Claims.ClaimsIdentity;
+                if (claimsIdentity != null)
+                {
+                    var nameIdClaim = claimsIdentity.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+                    if (nameIdClaim != null && !claimsIdentity.HasClaim(c => c.Type == "sub"))
+                    {
+                        claimsIdentity.AddClaim(new System.Security.Claims.Claim("sub", nameIdClaim.Value));
+                    }
+                }
+                return Task.CompletedTask;
             }
         };
     });
@@ -145,6 +158,7 @@ app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseSerilogRequestLogging();
 app.UseHttpsRedirection();
 app.UseCors("AllowAll");
+app.UseWebSockets();
 app.UseAuthentication();
 app.UseAuthorization();
 

@@ -43,8 +43,60 @@ function App() {
       }
     });
 
+    const peerRef = { current: null };
+
+    window.electronAPI.onWebRTCOffer(async ({ engineerConnId, sdp }) => {
+      console.log('Received WebRTC offer', engineerConnId);
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      peerRef.current = pc;
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          window.electronAPI.sendWebRTCIce({ targetConnId: engineerConnId, candidate: JSON.stringify(event.candidate) });
+        }
+      };
+
+      try {
+        const sourceId = await window.electronAPI.getDesktopStreamId();
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sourceId,
+              minWidth: 1280,
+              maxWidth: 1920,
+              minHeight: 720,
+              maxHeight: 1080
+            }
+          }
+        });
+        
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+        await pc.setRemoteDescription({ type: 'offer', sdp });
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        await window.electronAPI.sendWebRTCAnswer({ engineerConnId, sdp: answer.sdp });
+        console.log('Sent WebRTC answer');
+      } catch (err) {
+        console.error('WebRTC error', err);
+      }
+    });
+
+    window.electronAPI.onWebRTCIce(async (candidateJson) => {
+      if (peerRef.current) {
+        try {
+          const candidate = JSON.parse(candidateJson);
+          await peerRef.current.addIceCandidate(candidate);
+        } catch(e) {}
+      }
+    });
+
     return () => {
       if (unsubscribe) unsubscribe();
+      if (peerRef.current) peerRef.current.close();
     };
   }, []);
 

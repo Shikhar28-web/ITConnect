@@ -186,10 +186,19 @@ function RemoteSessionPage() {
   const isDrawing = useRef(false);
   const lastPos = useRef(null);
 
+  const initialized = useRef(false);
+
   useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+
     loadDevice();
-    initWebRTC();
-    return () => cleanup();
+    initWebRTC().catch(e => console.warn('WebRTC Init Aborted:', e.message));
+
+    return () => {
+      cleanup();
+      initialized.current = false;
+    };
   }, [deviceId]);
 
   async function loadDevice() {
@@ -251,7 +260,9 @@ function RemoteSessionPage() {
 
   function cleanup() {
     peerRef.current?.close();
-    signalRService.disconnect().catch(() => {});
+    if (signalRService.remoteControlHub) {
+       signalRService.remoteControlHub.stop().catch(() => {});
+    }
   }
 
   async function handleEndSession() {

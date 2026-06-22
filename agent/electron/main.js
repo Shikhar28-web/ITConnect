@@ -4,6 +4,7 @@ const { exec, spawn } = require('child_process');
 const os = require('os');
 const fs = require('fs');
 const { createServer } = require('http');
+const axios = require('axios');
 
 // Disable SSL/TLS validation for self-signed certificates in local/LAN environments
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -67,23 +68,27 @@ app.on('window-all-closed', (e) => {
 
 // ─── System Tray ─────────────────────────────────────────────────────────────
 function createTray() {
-  const iconPath = path.join(__dirname, '../public/tray-icon.png');
-  tray = new Tray(iconPath);
+  try {
+    const iconPath = path.join(__dirname, '../public/tray-icon.png');
+    tray = new Tray(iconPath);
 
-  const contextMenu = Menu.buildFromTemplate([
-    { label: 'IT Support Agent', enabled: false },
-    { type: 'separator' },
-    { label: 'Status: Connected', id: 'status', enabled: false },
-    { type: 'separator' },
-    { label: 'Show Window', click: () => mainWindow?.show() },
-    { label: 'About', click: () => mainWindow?.show() },
-    { type: 'separator' },
-    { label: 'Quit', click: () => { app.exit(0); } }
-  ]);
+    const contextMenu = Menu.buildFromTemplate([
+      { label: 'IT Support Agent', enabled: false },
+      { type: 'separator' },
+      { label: 'Status: Connected', id: 'status', enabled: false },
+      { type: 'separator' },
+      { label: 'Show Window', click: () => mainWindow?.show() },
+      { label: 'About', click: () => mainWindow?.show() },
+      { type: 'separator' },
+      { label: 'Quit', click: () => { app.exit(0); } }
+    ]);
 
-  tray.setToolTip('IT Support Agent - Running');
-  tray.setContextMenu(contextMenu);
-  tray.on('click', () => mainWindow?.show());
+    tray.setToolTip('IT Support Agent - Running');
+    tray.setContextMenu(contextMenu);
+    tray.on('click', () => mainWindow?.show());
+  } catch (err) {
+    console.warn('Failed to create system tray icon (icon file is probably missing):', err.message);
+  }
 }
 
 // ─── Main Window (hidden, shows on click) ────────────────────────────────────
@@ -252,21 +257,17 @@ async function registerDevice() {
       }
 
       const osVersion = os.version ? os.version() : process.platform;
-      const response = await fetch(`${SERVER_URL}/api/devices/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          hostname: os.hostname(),
-          ipAddress: ip,
-          macAddress: mac,
-          os: os.type() + ' ' + os.release(),
-          osVersion: osVersion,
-          agentVersion: app.getVersion()
-        })
+      const response = await axios.post(`${SERVER_URL}/api/devices/register`, {
+        hostname: os.hostname(),
+        ipAddress: ip,
+        macAddress: mac,
+        os: os.type() + ' ' + os.release(),
+        osVersion: osVersion,
+        agentVersion: app.getVersion()
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      if (response.status >= 200 && response.status < 300) {
+        const data = response.data;
         deviceId = data.id;
         console.log('Device registered with ID:', deviceId);
         updateTrayStatus('Connected');
@@ -275,7 +276,7 @@ async function registerDevice() {
         return;
       }
 
-      console.error('Device registration failed:', response.status, await response.text());
+      console.error('Device registration failed:', response.status, response.data);
       updateUiStatus(false, `Registration failed (status ${response.status})`);
     } catch (err) {
       console.error('Device registration failed:', err.message);
@@ -313,11 +314,7 @@ function startMetricsReporter() {
     };
 
     try {
-      await fetch(`${SERVER_URL}/api/devices/${deviceId}/metrics`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(metrics)
-      });
+      await axios.post(`${SERVER_URL}/api/devices/${deviceId}/metrics`, metrics);
     } catch (e) { /* silent fail */ }
   }, 30000); // Every 30 seconds
 }
@@ -573,5 +570,10 @@ ipcMain.handle('get-server-url', () => {
 
 ipcMain.handle('get-agent-status', () => {
   return uiStatus;
+});
+
+ipcMain.handle('get-desktop-stream-id', async () => {
+  const sources = await desktopCapturer.getSources({ types: ['screen'] });
+  return sources[0]?.id;
 });
 

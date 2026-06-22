@@ -22,10 +22,10 @@ cd server
 # Restore packages
 dotnet restore ITComputer.sln
 
-# Configure database (edit appsettings.json with your SQL Server connection string)
-# Default: Server=localhost;Database=ITComputerDB;Trusted_Connection=True;...
+# Configure database (uses SQLite by default, auto-created on startup)
+# Connection string in server/ITComputer.API/appsettings.json
 
-# Run migrations + start server
+# Start server
 cd ITComputer.API
 dotnet run
 ```
@@ -114,7 +114,7 @@ npm run electron:build   # Build installer
 
 ## Database
 
-SQL Server — auto-migrated on startup.
+SQLite (default) — auto-created and migrated on startup.
 
 Tables: `Users`, `Devices`, `DeviceMetrics`, `RemoteSessions`, `SessionRecordings`, `SessionLogs`, `SupportTickets`, `FileTransfers`, `ChatMessages`, `Notifications`, `SoftwareDeployments`, `AuditLogs`
 

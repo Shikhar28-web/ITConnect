@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onWebRTCIce: (callback) => ipcRenderer.on('webrtc-ice', (_, data) => callback(data)),
   sendWebRTCAnswer: (data) => ipcRenderer.invoke('webrtc-answer', data),
   sendWebRTCIce: (data) => ipcRenderer.invoke('webrtc-ice', data),
+  getDesktopStreamId: () => ipcRenderer.invoke('get-desktop-stream-id'),
 
   // Clipboard
   getClipboard: () => ipcRenderer.invoke('clipboard-get'),
