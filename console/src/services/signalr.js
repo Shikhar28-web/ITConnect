@@ -93,11 +93,13 @@ class SignalRService {
   }
 
   async setBlackout(deviceId, sessionId, enabled, progressInfo) {
-    await this.remoteControlHub?.invoke('SetBlackout', deviceId.toString(), sessionId, enabled, progressInfo);
+    const sId = parseInt(sessionId) || 0;
+    await this.remoteControlHub?.invoke('SetBlackout', deviceId.toString(), sId, enabled, progressInfo);
   }
-
+ 
   async setPrivacyMode(deviceId, sessionId, enabled) {
-    await this.remoteControlHub?.invoke('SetPrivacyMode', deviceId.toString(), sessionId, enabled);
+    const sId = parseInt(sessionId) || 0;
+    await this.remoteControlHub?.invoke('SetPrivacyMode', deviceId.toString(), sId, enabled);
   }
 
   async syncClipboard(deviceId, text) {
