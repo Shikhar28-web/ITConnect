@@ -5,6 +5,9 @@ const os = require('os');
 const fs = require('fs');
 const { createServer } = require('http');
 
+// Disable SSL/TLS validation for self-signed certificates in local/LAN environments
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 // ─── Config ──────────────────────────────────────────────────────────────────
 function loadServerUrl() {
   if (process.env.SERVER_URL) return process.env.SERVER_URL;
