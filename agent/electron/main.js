@@ -189,15 +189,6 @@ public class Win32Input {
         mouse_event(up, 0, 0, 0, 0);
     }
 }
-
-public class WinAffinity {
-    [DllImport("user32.dll")]
-    public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
-    
-    public static void Exclude(long hwnd) {
-        SetWindowDisplayAffinity((IntPtr)hwnd, 17); // WDA_EXCLUDEFROMCAPTURE = 0x11 (17)
-    }
-}
 "@
 Add-Type -AssemblyName System.Windows.Forms
 
@@ -212,8 +203,6 @@ while ($line = [Console]::ReadLine()) {
         } elseif ($parts[0] -eq 'k') {
             $keyStr = $line.Substring(2)
             [System.Windows.Forms.SendKeys]::SendWait($keyStr)
-        } elseif ($parts[0] -eq 'exclude') {
-            [WinAffinity]::Exclude([int64]$parts[1])
         }
     } catch {
         # ignore error
@@ -313,19 +302,9 @@ function createBlackoutWindow(progressInfo) {
 
     win.setIgnoreMouseEvents(true);
     win.setAlwaysOnTop(true, 'screen-saver');
+    win.setContentProtection(true);
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
     win.show();
-    
-    // Set display affinity to exclude this window from screen capture
-    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-      try {
-        const hwndBuf = win.getNativeWindowHandle();
-        const hwnd = process.arch === 'x64' ? hwndBuf.readBigInt64LE().toString() : hwndBuf.readInt32LE().toString();
-        inputWorker.stdin.write(`exclude ${hwnd}\n`);
-      } catch (err) {
-        console.error('Failed to exclude blackout window from capture:', err);
-      }
-    }
 
     blackoutWindows.push(win);
   }

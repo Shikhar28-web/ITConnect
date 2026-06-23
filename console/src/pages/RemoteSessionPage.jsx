@@ -306,23 +306,71 @@ function RemoteSessionPage() {
     if (now - lastMouseMoveTime.current < 50) return; // Throttle to 20 events per second
     lastMouseMoveTime.current = now;
 
-    const rect = videoRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const ratioX = (e.clientX - rect.left) / rect.width;
-    const ratioY = (e.clientY - rect.top) / rect.height;
-    const x = Math.round(ratioX * 10000);
-    const y = Math.round(ratioY * 10000);
+    const video = videoRef.current;
+    const rect = video?.getBoundingClientRect();
+    if (!rect || video.videoWidth === 0 || video.videoHeight === 0) return;
+
+    const videoRatio = video.videoWidth / video.videoHeight;
+    const rectRatio = rect.width / rect.height;
+    let contentWidth = rect.width;
+    let contentHeight = rect.height;
+    let contentLeft = rect.left;
+    let contentTop = rect.top;
+
+    if (rectRatio > videoRatio) {
+      // Pillarbox (black bars on left/right)
+      contentWidth = rect.height * videoRatio;
+      contentLeft = rect.left + (rect.width - contentWidth) / 2;
+    } else {
+      // Letterbox (black bars on top/bottom)
+      contentHeight = rect.width / videoRatio;
+      contentTop = rect.top + (rect.height - contentHeight) / 2;
+    }
+
+    const ratioX = (e.clientX - contentLeft) / contentWidth;
+    const ratioY = (e.clientY - contentTop) / contentHeight;
+    
+    // Clamp ratios to [0, 1] to prevent out of bounds clicks
+    const clampedX = Math.max(0, Math.min(1, ratioX));
+    const clampedY = Math.max(0, Math.min(1, ratioY));
+
+    const x = Math.round(clampedX * 10000);
+    const y = Math.round(clampedY * 10000);
     await signalRService.sendMouseMove(parseInt(deviceId), x, y);
   }, [annotation, connected, deviceId]);
 
   const handleMouseClick = useCallback(async (e) => {
     if (annotation || !connected) return;
-    const rect = videoRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const ratioX = (e.clientX - rect.left) / rect.width;
-    const ratioY = (e.clientY - rect.top) / rect.height;
-    const x = Math.round(ratioX * 10000);
-    const y = Math.round(ratioY * 10000);
+    const video = videoRef.current;
+    const rect = video?.getBoundingClientRect();
+    if (!rect || video.videoWidth === 0 || video.videoHeight === 0) return;
+
+    const videoRatio = video.videoWidth / video.videoHeight;
+    const rectRatio = rect.width / rect.height;
+    let contentWidth = rect.width;
+    let contentHeight = rect.height;
+    let contentLeft = rect.left;
+    let contentTop = rect.top;
+
+    if (rectRatio > videoRatio) {
+      // Pillarbox (black bars on left/right)
+      contentWidth = rect.height * videoRatio;
+      contentLeft = rect.left + (rect.width - contentWidth) / 2;
+    } else {
+      // Letterbox (black bars on top/bottom)
+      contentHeight = rect.width / videoRatio;
+      contentTop = rect.top + (rect.height - contentHeight) / 2;
+    }
+
+    const ratioX = (e.clientX - contentLeft) / contentWidth;
+    const ratioY = (e.clientY - contentTop) / contentHeight;
+    
+    // Clamp ratios to [0, 1] to prevent out of bounds clicks
+    const clampedX = Math.max(0, Math.min(1, ratioX));
+    const clampedY = Math.max(0, Math.min(1, ratioY));
+
+    const x = Math.round(clampedX * 10000);
+    const y = Math.round(clampedY * 10000);
     await signalRService.sendMouseClick(parseInt(deviceId), x, y, e.button);
   }, [annotation, connected, deviceId]);
 
