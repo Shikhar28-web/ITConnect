@@ -89,6 +89,18 @@ class SignalRService {
     await this.remoteControlHub?.invoke('SendMouseClick', deviceId.toString(), x, y, button);
   }
 
+  async sendMouseDown(deviceId, x, y, button) {
+    await this.remoteControlHub?.invoke('SendMouseDown', deviceId.toString(), x, y, button);
+  }
+
+  async sendMouseUp(deviceId, x, y, button) {
+    await this.remoteControlHub?.invoke('SendMouseUp', deviceId.toString(), x, y, button);
+  }
+
+  async sendMouseWheel(deviceId, delta) {
+    await this.remoteControlHub?.invoke('SendMouseWheel', deviceId.toString(), delta);
+  }
+
   async sendKeyEvent(deviceId, key, isDown, ctrl, alt, shift) {
     await this.remoteControlHub?.invoke('SendKeyEvent', deviceId.toString(), key, isDown, ctrl, alt, shift);
   }
@@ -125,6 +137,10 @@ class SignalRService {
 
   async requestFileDownload(deviceId, filePath) {
     await this.remoteControlHub?.invoke('RequestFileDownload', deviceId.toString(), filePath);
+  }
+
+  async sendFileToAgent(deviceId, fileId, fileName, targetFolder) {
+    await this.remoteControlHub?.invoke('SendFileToAgent', deviceId.toString(), fileId, fileName, targetFolder);
   }
 
   async getProcessList(deviceId) {

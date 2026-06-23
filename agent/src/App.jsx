@@ -48,6 +48,14 @@ function App() {
 
     window.electronAPI.onWebRTCOffer(async ({ engineerConnId, sdp }) => {
       console.log('Received WebRTC offer', engineerConnId);
+      if (peerRef.current) {
+        console.log('Closing previous active PeerConnection...');
+        try {
+          peerRef.current.close();
+        } catch (err) {
+          console.warn('Failed to close old PC:', err);
+        }
+      }
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       peerRef.current = pc;
 

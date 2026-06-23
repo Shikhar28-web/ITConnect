@@ -473,6 +473,113 @@ function RemoteSessionPage() {
     await signalRService.sendMouseClick(parseInt(deviceId), x, y, e.button);
   }, [annotation, connected, deviceId]);
 
+  const handleMouseDown = useCallback(async (e) => {
+    if (annotation || !connected) return;
+    const video = videoRef.current;
+    const rect = video?.getBoundingClientRect();
+    if (!rect || video.videoWidth === 0 || video.videoHeight === 0) return;
+
+    const videoRatio = video.videoWidth / video.videoHeight;
+    const rectRatio = rect.width / rect.height;
+    let contentWidth = rect.width;
+    let contentHeight = rect.height;
+    let contentLeft = rect.left;
+    let contentTop = rect.top;
+
+    if (rectRatio > videoRatio) {
+      contentWidth = rect.height * videoRatio;
+      contentLeft = rect.left + (rect.width - contentWidth) / 2;
+    } else {
+      contentHeight = rect.width / videoRatio;
+      contentTop = rect.top + (rect.height - contentHeight) / 2;
+    }
+
+    const ratioX = (e.clientX - contentLeft) / contentWidth;
+    const ratioY = (e.clientY - contentTop) / contentHeight;
+    const clampedX = Math.max(0, Math.min(1, ratioX));
+    const clampedY = Math.max(0, Math.min(1, ratioY));
+
+    const x = Math.round(clampedX * 10000);
+    const y = Math.round(clampedY * 10000);
+    await signalRService.sendMouseDown(parseInt(deviceId), x, y, e.button);
+  }, [annotation, connected, deviceId]);
+
+  const handleMouseUp = useCallback(async (e) => {
+    if (annotation || !connected) return;
+    const video = videoRef.current;
+    const rect = video?.getBoundingClientRect();
+    if (!rect || video.videoWidth === 0 || video.videoHeight === 0) return;
+
+    const videoRatio = video.videoWidth / video.videoHeight;
+    const rectRatio = rect.width / rect.height;
+    let contentWidth = rect.width;
+    let contentHeight = rect.height;
+    let contentLeft = rect.left;
+    let contentTop = rect.top;
+
+    if (rectRatio > videoRatio) {
+      contentWidth = rect.height * videoRatio;
+      contentLeft = rect.left + (rect.width - contentWidth) / 2;
+    } else {
+      contentHeight = rect.width / videoRatio;
+      contentTop = rect.top + (rect.height - contentHeight) / 2;
+    }
+
+    const ratioX = (e.clientX - contentLeft) / contentWidth;
+    const ratioY = (e.clientY - contentTop) / contentHeight;
+    const clampedX = Math.max(0, Math.min(1, ratioX));
+    const clampedY = Math.max(0, Math.min(1, ratioY));
+
+    const x = Math.round(clampedX * 10000);
+    const y = Math.round(clampedY * 10000);
+    await signalRService.sendMouseUp(parseInt(deviceId), x, y, e.button);
+  }, [annotation, connected, deviceId]);
+
+  const handleWheel = useCallback(async (e) => {
+    if (annotation || !connected) return;
+    // Map vertical scroll wheel deltas (standardized to -120 / +120 steps)
+    const delta = e.deltaY > 0 ? -120 : 120;
+    await signalRService.sendMouseWheel(parseInt(deviceId), delta);
+  }, [annotation, connected, deviceId]);
+
+  // Drag and Drop files directly onto the viewer canvas
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    if (!connected) return;
+    const files = e.dataTransfer.files;
+    if (files.length === 0) return;
+
+    const file = files[0];
+    toast.info(`Uploading file to remote agent: ${file.name}...`);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const response = await fetch(`${BASE_URL}/api/files/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const { fileId, fileName } = data;
+        
+        // Tell agent to download file to Desktop by default
+        const desktopPath = 'C:\\Users\\Public\\Desktop';
+        await signalRService.sendFileToAgent(parseInt(deviceId), fileId, fileName, desktopPath);
+        toast.success(`File successfully placed on remote Desktop!`);
+      } else {
+        toast.error('File upload failed');
+      }
+    } catch (err) {
+      toast.error(`Error uploading file: ${err.message}`);
+    }
+  };
+
   const handleKeyDown = useCallback(async (e) => {
     if (!connected || document.activeElement.tagName === 'INPUT') return;
     e.preventDefault();
@@ -598,149 +705,55 @@ function RemoteSessionPage() {
                 <button id="btn-clipboard-pull" className="toolbar-btn" title="Get Clipboard from Remote" onClick={handleClipboardPull}>📋📥</button>
               </div>
 
-              <div className="toolbar-group" style={{ marginLeft: 'auto', position: 'relative' }}>
+              <div className="toolbar-group" style={{ marginLeft: 'auto' }}>
                 <button
-                  id="btn-cad-dropdown"
                   className="toolbar-btn danger"
-                  title="Ctrl+Alt+Del Options"
-                  onClick={() => setShowCadDropdown(!showCadDropdown)}
-                  style={{ width: 'auto', padding: '0 8px', display: 'flex', gap: '4px', alignItems: 'center' }}
-                >
-                  <span>⌨️ CAD</span>
-                  <span style={{ fontSize: 9 }}>▼</span>
-                </button>
-                
-                {showCadDropdown && (
-                  <div
-                    className="cad-dropdown-menu"
-                    style={{
-                      position: 'absolute',
-                      top: '100%',
-                      right: 4,
-                      marginTop: 8,
-                      background: 'var(--bg-card)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius-sm)',
-                      boxShadow: 'var(--shadow-lg)',
-                      zIndex: 100,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      minWidth: 170,
-                      overflow: 'hidden'
-                    }}
-                  >
-                    <button
-                      className="cad-dropdown-item"
-                      style={{
-                        padding: '8px 12px',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        fontSize: 12,
-                        transition: 'background 0.2s',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                      onClick={() => {
-                        signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'cad');
-                        setShowCadDropdown(false);
-                        toast.info('Sending Ctrl+Alt+Delete command to remote host...');
-                      }}
-                    >
-                      ⌨️ Send Ctrl+Alt+Del
-                    </button>
-                    <button
-                      className="cad-dropdown-item"
-                      style={{
-                        padding: '8px 12px',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        fontSize: 12,
-                        transition: 'background 0.2s',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                      onClick={() => {
-                        signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'lock');
-                        setShowCadDropdown(false);
-                        toast.info('Locking workstation...');
-                      }}
-                    >
-                      🔒 Lock Workstation
-                    </button>
-                    <button
-                      className="cad-dropdown-item"
-                      style={{
-                        padding: '8px 12px',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        fontSize: 12,
-                        transition: 'background 0.2s',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                      onClick={() => {
-                        signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'taskmgr');
-                        setShowCadDropdown(false);
-                        toast.info('Opening Task Manager...');
-                      }}
-                    >
-                      ⚙️ Open Task Manager
-                    </button>
-                    <button
-                      className="cad-dropdown-item"
-                      style={{
-                        padding: '8px 12px',
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        fontSize: 12,
-                        transition: 'background 0.2s',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                      onClick={() => {
-                        signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'logoff');
-                        setShowCadDropdown(false);
-                        toast.info('Signing out remote user...');
-                      }}
-                    >
-                      👤 Sign Out (Log Off)
-                    </button>
-                  </div>
-                )}
-
+                  title="Send Ctrl+Alt+Del"
+                  onClick={() => {
+                    signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'cad');
+                    toast.info('Sending Ctrl+Alt+Delete command to remote host...');
+                  }}
+                  style={{ width: 'auto', padding: '0 8px' }}
+                >⌨️ CAD</button>
+                <button
+                  className="toolbar-btn danger"
+                  title="Lock Workstation"
+                  onClick={() => {
+                    signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'lock');
+                    toast.info('Locking remote workstation...');
+                  }}
+                >🔒</button>
+                <button
+                  className="toolbar-btn danger"
+                  title="Open Task Manager"
+                  onClick={() => {
+                    signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'taskmgr');
+                    toast.info('Opening remote Task Manager...');
+                  }}
+                >⚙️</button>
+                <button
+                  className="toolbar-btn danger"
+                  title="Log Off / Sign Out"
+                  onClick={() => {
+                    signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'logoff');
+                    toast.info('Signing out remote user...');
+                  }}
+                >👤</button>
                 <button
                   className="toolbar-btn danger"
                   title="Restart"
-                  onClick={() => signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'restart')}
+                  onClick={() => {
+                    signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'restart');
+                    toast.info('Restarting remote host...');
+                  }}
                 >🔄</button>
                 <button
                   className="toolbar-btn danger"
                   title="Shutdown"
-                  onClick={() => signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'shutdown')}
+                  onClick={() => {
+                    signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'shutdown');
+                    toast.info('Shutting down remote host...');
+                  }}
                 >⏻</button>
               </div>
             </div>
@@ -757,10 +770,15 @@ function RemoteSessionPage() {
                 autoPlay
                 playsInline
                 className="viewer-canvas"
-                style={{ transform: `scale(${zoom / 100})` }}
+                style={{ transform: `scale(${zoom / 100})`, cursor: 'default' }}
                 onMouseMove={handleMouseMove}
                 onClick={handleMouseClick}
-                onContextMenu={(e) => { e.preventDefault(); handleMouseClick({ ...e, button: 2 }); }}
+                onMouseDown={handleMouseDown}
+                onMouseUp={handleMouseUp}
+                onWheel={handleWheel}
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+                onContextMenu={(e) => { e.preventDefault(); }}
               />
               <canvas
                 ref={canvasRef}
@@ -811,6 +829,49 @@ function RemoteSessionPage() {
                   signalRService.listDirectory(parseInt(deviceId), currentPath);
                 }}
               >Go / Refresh</button>
+              
+              <input
+                type="file"
+                id="file-upload-input"
+                style={{ display: 'none' }}
+                onChange={async (e) => {
+                  const file = e.target.files[0];
+                  if (!file) return;
+                  setTransferringFile(file.name);
+                  toast.info(`Uploading file to remote agent: ${file.name}...`);
+                  try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    
+                    const response = await fetch(`${BASE_URL}/api/files/upload`, {
+                      method: 'POST',
+                      body: formData
+                    });
+                    
+                    if (response.ok) {
+                      const data = await response.json();
+                      const { fileId, fileName } = data;
+                      toast.info(`Sending ${fileName} to remote PC target folder...`);
+                      await signalRService.sendFileToAgent(parseInt(deviceId), fileId, fileName, currentPath);
+                      toast.success(`File successfully sent to remote folder: ${currentPath}`);
+                    } else {
+                      toast.error('File upload failed');
+                    }
+                  } catch (err) {
+                    toast.error(`Error sending file: ${err.message}`);
+                  } finally {
+                    setTransferringFile(null);
+                    e.target.value = '';
+                  }
+                }}
+              />
+              <button
+                className="btn btn-success btn-sm"
+                onClick={() => document.getElementById('file-upload-input').click()}
+                disabled={transferringFile !== null}
+              >
+                {transferringFile ? '⏳ Sending...' : '📤 Send File'}
+              </button>
             </div>
             
             {fileLoading ? (

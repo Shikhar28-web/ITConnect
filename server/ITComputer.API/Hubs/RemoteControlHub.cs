@@ -111,6 +111,30 @@ public class RemoteControlHub : Hub
             await Clients.Client(agentConnId).SendAsync("MouseClick", x, y, button);
     }
 
+    /// <summary>Engineer → Agent: Mouse down event</summary>
+    public async Task SendMouseDown(string deviceId, int x, int y, int button)
+    {
+        EnsureEngineer();
+        if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
+            await Clients.Client(agentConnId).SendAsync("MouseDown", x, y, button);
+    }
+
+    /// <summary>Engineer → Agent: Mouse up event</summary>
+    public async Task SendMouseUp(string deviceId, int x, int y, int button)
+    {
+        EnsureEngineer();
+        if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
+            await Clients.Client(agentConnId).SendAsync("MouseUp", x, y, button);
+    }
+
+    /// <summary>Engineer → Agent: Mouse wheel event</summary>
+    public async Task SendMouseWheel(string deviceId, int delta)
+    {
+        EnsureEngineer();
+        if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
+            await Clients.Client(agentConnId).SendAsync("MouseWheel", delta);
+    }
+
     /// <summary>Engineer → Agent: Keyboard event</summary>
     public async Task SendKeyEvent(string deviceId, string key, bool isDown, bool ctrl, bool alt, bool shift)
     {
@@ -227,6 +251,14 @@ public class RemoteControlHub : Hub
         EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
             await Clients.Client(agentConnId).SendAsync("RequestFileDownload", filePath, Context.ConnectionId);
+    }
+
+    /// <summary>Engineer → Agent: Tell agent to download a file from server and save it</summary>
+    public async Task SendFileToAgent(string deviceId, string fileId, string fileName, string targetFolder)
+    {
+        EnsureEngineer();
+        if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
+            await Clients.Client(agentConnId).SendAsync("ReceiveFileFromAdmin", fileId, fileName, targetFolder, Context.ConnectionId);
     }
 
     /// <summary>Agent → Engineer: Notify file is available for download</summary>

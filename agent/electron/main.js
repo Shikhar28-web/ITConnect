@@ -163,12 +163,16 @@ public class Win32Input {
     [DllImport("user32.dll")]
     public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, uint dwExtraInfo);
 
+    [DllImport("user32.dll")]
+    public static extern bool BlockInput(bool fBlockIt);
+
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
     public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
     public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
     public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
     public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
+    public const uint MOUSEEVENTF_WHEEL = 0x0800;
 
     public static void Move(int x, int y) {
         SetCursorPos(x, y);
@@ -189,6 +193,26 @@ public class Win32Input {
         System.Threading.Thread.Sleep(15);
         mouse_event(up, 0, 0, 0, 0);
     }
+
+    public static void MouseDown(int x, int y, int button) {
+        SetCursorPos(x, y);
+        uint flag = MOUSEEVENTF_LEFTDOWN;
+        if (button == 2) flag = MOUSEEVENTF_RIGHTDOWN;
+        else if (button == 1) flag = MOUSEEVENTF_MIDDLEDOWN;
+        mouse_event(flag, 0, 0, 0, 0);
+    }
+
+    public static void MouseUp(int x, int y, int button) {
+        SetCursorPos(x, y);
+        uint flag = MOUSEEVENTF_LEFTUP;
+        if (button == 2) flag = MOUSEEVENTF_RIGHTUP;
+        else if (button == 1) flag = MOUSEEVENTF_MIDDLEUP;
+        mouse_event(flag, 0, 0, 0, 0);
+    }
+
+    public static void MouseWheel(int delta) {
+        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)delta, 0);
+    }
 }
 "@
 Add-Type -AssemblyName System.Windows.Forms
@@ -201,6 +225,14 @@ while ($line = [Console]::ReadLine()) {
             [Win32Input]::Move([int]$parts[1], [int]$parts[2])
         } elseif ($parts[0] -eq 'c') {
             [Win32Input]::Click([int]$parts[1], [int]$parts[2], [int]$parts[3])
+        } elseif ($parts[0] -eq 'd') {
+            [Win32Input]::MouseDown([int]$parts[1], [int]$parts[2], [int]$parts[3])
+        } elseif ($parts[0] -eq 'u') {
+            [Win32Input]::MouseUp([int]$parts[1], [int]$parts[2], [int]$parts[3])
+        } elseif ($parts[0] -eq 'w') {
+            [Win32Input]::MouseWheel([int]$parts[1])
+        } elseif ($parts[0] -eq 'b') {
+            [Win32Input]::BlockInput([int]$parts[1] -eq 1)
         } elseif ($parts[0] -eq 'k') {
             $keyStr = $line.Substring(2)
             [System.Windows.Forms.SendKeys]::SendWait($keyStr)
@@ -228,7 +260,7 @@ function createBlackoutWindow(progressInfo) {
     <html>
     <head>
       <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * { margin: 0; padding: 0; box-sizing: border-box; cursor: none !important; }
         body {
           background: #000;
           color: #fff;
@@ -239,6 +271,7 @@ function createBlackoutWindow(progressInfo) {
           height: 100vh;
           font-family: 'Segoe UI', sans-serif;
           user-select: none;
+          cursor: none !important;
         }
         .logo { font-size: 48px; margin-bottom: 24px; }
         .company { font-size: 28px; font-weight: 700; color: #4A9EFF; margin-bottom: 40px; }
@@ -441,20 +474,42 @@ async function connectSignalR() {
     mainWindow?.webContents.send('webrtc-ice', candidate);
   });
 
-  signalRConnection.on('MouseMove', async (x, y) => {
+  const getScaledCoords = (x, y) => {
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.bounds;
     const rx = Math.round((x / 10000) * (width - 1));
     const ry = Math.round((y / 10000) * (height - 1));
+    return { rx, ry };
+  };
+
+  signalRConnection.on('MouseMove', async (x, y) => {
+    const { rx, ry } = getScaledCoords(x, y);
     await injectMouseMove(rx, ry);
   });
 
   signalRConnection.on('MouseClick', async (x, y, button) => {
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const { width, height } = primaryDisplay.bounds;
-    const rx = Math.round((x / 10000) * (width - 1));
-    const ry = Math.round((y / 10000) * (height - 1));
+    const { rx, ry } = getScaledCoords(x, y);
     await injectMouseClick(rx, ry, button);
+  });
+
+  signalRConnection.on('MouseDown', async (x, y, button) => {
+    const { rx, ry } = getScaledCoords(x, y);
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      inputWorker.stdin.write(`d ${rx} ${ry} ${button}\n`);
+    }
+  });
+
+  signalRConnection.on('MouseUp', async (x, y, button) => {
+    const { rx, ry } = getScaledCoords(x, y);
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      inputWorker.stdin.write(`u ${rx} ${ry} ${button}\n`);
+    }
+  });
+
+  signalRConnection.on('MouseWheel', async (delta) => {
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      inputWorker.stdin.write(`w ${delta}\n`);
+    }
   });
 
   signalRConnection.on('KeyEvent', async (key, isDown, ctrl, alt, shift) => {
@@ -464,8 +519,14 @@ async function connectSignalR() {
   signalRConnection.on('SetBlackout', (enabled, progressInfo) => {
     if (enabled) {
       createBlackoutWindow(progressInfo);
+      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+        inputWorker.stdin.write("b 1\n");
+      }
     } else {
       destroyBlackoutWindow();
+      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+        inputWorker.stdin.write("b 0\n");
+      }
     }
   });
 
@@ -516,10 +577,25 @@ async function connectSignalR() {
         if (response.status === 200) {
           const { fileId, fileName } = response.data;
           await signalRConnection.invoke('FileDownloadReady', engineerConnId, fileId, fileName);
-        }
       }
     } catch (e) {
       console.error('File download processing failed:', e.message);
+    }
+  });
+
+  signalRConnection.on('ReceiveFileFromAdmin', async (fileId, fileName, targetFolder, engineerConnId) => {
+    try {
+      const targetPath = path.join(targetFolder, fileName);
+      console.log(`Downloading file ${fileName} from admin to ${targetPath}...`);
+      const downloadUrl = `${SERVER_URL}/api/files/download/${fileId}?name=${encodeURIComponent(fileName)}`;
+      const response = await axios.get(downloadUrl, { responseType: 'arraybuffer' });
+      fs.writeFileSync(targetPath, Buffer.from(response.data));
+      console.log('File download completed successfully');
+      
+      const listing = await listDirectory(targetFolder);
+      await signalRConnection.invoke('SendDirectoryListing', engineerConnId, JSON.stringify(listing));
+    } catch (e) {
+      console.error('ReceiveFileFromAdmin failed:', e.message);
     }
   });
 
