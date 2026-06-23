@@ -577,6 +577,7 @@ async function connectSignalR() {
         if (response.status === 200) {
           const { fileId, fileName } = response.data;
           await signalRConnection.invoke('FileDownloadReady', engineerConnId, fileId, fileName);
+        }
       }
     } catch (e) {
       console.error('File download processing failed:', e.message);
