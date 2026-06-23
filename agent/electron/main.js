@@ -4,10 +4,11 @@ const { exec, spawn } = require('child_process');
 const os = require('os');
 const fs = require('fs');
 const { createServer } = require('http');
-const axios = require('axios');
+const axios = require('axios/dist/node/axios.cjs');
 
 // Disable SSL/TLS validation for self-signed certificates in local/LAN environments
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+app.commandLine.appendSwitch('ignore-certificate-errors');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 function loadServerUrl() {
@@ -34,6 +35,8 @@ console.log('Connecting to server:', SERVER_URL);
 let tray = null;
 let mainWindow = null;
 let blackoutWindows = [];
+let lockWindows = [];
+let lockActive = false;
 let privacyModeActive = false;
 let inputWorker = null;
 let signalRConnection = null;
@@ -75,7 +78,13 @@ app.on('window-all-closed', (e) => {
 });
 
 app.on('quit', () => {
-  inputWorker?.kill();
+  destroyLockWindow();
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    try {
+      inputWorker.stdin.write("r\n");
+      inputWorker.stdin.end();
+    } catch (e) {}
+  }
 });
 
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
@@ -213,6 +222,48 @@ public class Win32Input {
     public static void MouseWheel(int delta) {
         mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)delta, 0);
     }
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetSystemCursor(IntPtr hcur, uint id);
+
+    [DllImport("user32.dll")]
+    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
+    [DllImport("user32.dll")]
+    public static extern int GetSystemMetrics(int nIndex);
+
+    public const uint SPI_SETCURSORS = 0x0057;
+
+    public static readonly uint[] CursorIds = { 32512, 32513, 32514, 32515, 32516, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650, 32651 };
+
+    public static void HideGlobalCursor() {
+        int cx = GetSystemMetrics(13); // SM_CXCURSOR
+        int cy = GetSystemMetrics(14); // SM_CYCURSOR
+        if (cx <= 0) cx = 32;
+        if (cy <= 0) cy = 32;
+
+        int widthInBytes = ((cx + 15) / 16) * 2;
+        int numBytes = widthInBytes * cy;
+
+        byte[] andPlane = new byte[numBytes];
+        for (int i = 0; i < numBytes; i++) andPlane[i] = 0xFF;
+        byte[] xorPlane = new byte[numBytes];
+        for (int i = 0; i < numBytes; i++) xorPlane[i] = 0x00;
+        
+        foreach (uint id in CursorIds) {
+            IntPtr blank = CreateCursor(IntPtr.Zero, 0, 0, cx, cy, andPlane, xorPlane);
+            if (blank != IntPtr.Zero) {
+                SetSystemCursor(blank, id);
+            }
+        }
+    }
+
+    public static void RestoreGlobalCursor() {
+        SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+    }
 }
 "@
 Add-Type -AssemblyName System.Windows.Forms
@@ -233,6 +284,10 @@ while ($line = [Console]::ReadLine()) {
             [Win32Input]::MouseWheel([int]$parts[1])
         } elseif ($parts[0] -eq 'b') {
             [Win32Input]::BlockInput([int]$parts[1] -eq 1)
+        } elseif ($parts[0] -eq 'h') {
+            [Win32Input]::HideGlobalCursor()
+        } elseif ($parts[0] -eq 'r') {
+            [Win32Input]::RestoreGlobalCursor()
         } elseif ($parts[0] -eq 'k') {
             $keyStr = $line.Substring(2)
             [System.Windows.Forms.SendKeys]::SendWait($keyStr)
@@ -241,6 +296,7 @@ while ($line = [Console]::ReadLine()) {
         # ignore error
     }
 }
+[Win32Input]::RestoreGlobalCursor()
 `;
 
   inputWorker = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', '-']);
@@ -310,7 +366,7 @@ function createBlackoutWindow(progressInfo) {
       y: d.bounds.y,
       width: d.bounds.width,
       height: d.bounds.height,
-      fullscreen: true,
+      fullscreen: false,
       alwaysOnTop: true,
       frame: false,
       skipTaskbar: true,
@@ -341,6 +397,162 @@ function destroyBlackoutWindow() {
     }
   }
   blackoutWindows = [];
+}
+
+// ─── Custom Lock Overlay Window ───────────────────────────────────────────────
+let isClosingProgrammatically = false;
+
+function createLockWindow() {
+  destroyLockWindow(); // Ensure previous ones are cleaned up
+  lockActive = true;
+
+  const lockHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>Workspace Locked</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          background: #111827;
+          background-image: radial-gradient(circle at center, #1f2937 0%, #111827 100%);
+          color: #ffffff;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          height: 100vh;
+          font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+          user-select: none;
+          overflow: hidden;
+        }
+        .container {
+          text-align: center;
+          padding: 48px;
+          border-radius: 24px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          backdrop-filter: blur(20px);
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+          max-width: 480px;
+          width: 90%;
+          animation: scaleUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes scaleUp {
+          from { transform: scale(0.95); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
+        }
+        .lock-icon {
+          font-size: 72px;
+          margin-bottom: 24px;
+          display: inline-block;
+          animation: pulse 3s infinite ease-in-out;
+        }
+        @keyframes pulse {
+          0% { transform: scale(1); filter: drop-shadow(0 0 0px rgba(59, 130, 246, 0)); }
+          50% { transform: scale(1.05); filter: drop-shadow(0 0 15px rgba(59, 130, 246, 0.6)); }
+          100% { transform: scale(1); filter: drop-shadow(0 0 0px rgba(59, 130, 246, 0)); }
+        }
+        .title {
+          font-size: 28px;
+          font-weight: 700;
+          margin-bottom: 16px;
+          letter-spacing: -0.5px;
+          background: linear-gradient(135deg, #ffffff 0%, #d1d5db 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+        .message {
+          font-size: 15px;
+          color: #9ca3af;
+          line-height: 1.6;
+          margin-bottom: 32px;
+        }
+        .badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 16px;
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.2);
+          color: #60a5fa;
+          border-radius: 9999px;
+          font-size: 12px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+        .badge-dot {
+          width: 8px;
+          height: 8px;
+          background-color: #3b82f6;
+          border-radius: 50%;
+          animation: blink 1.5s infinite;
+        }
+        @keyframes blink {
+          0% { opacity: 0.3; }
+          50% { opacity: 1; }
+          100% { opacity: 0.3; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="lock-icon">🔒</div>
+        <h1 class="title">Workspace Locked</h1>
+        <p class="message">This workspace has been locked by the administrator. Remote maintenance is currently in progress.</p>
+        <div class="badge">
+          <div class="badge-dot"></div>
+          IT Session Active
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const displays = screen.getAllDisplays();
+  for (const d of displays) {
+    const win = new BrowserWindow({
+      x: d.bounds.x,
+      y: d.bounds.y,
+      width: d.bounds.width,
+      height: d.bounds.height,
+      fullscreen: true,
+      alwaysOnTop: true,
+      frame: false,
+      skipTaskbar: true,
+      kiosk: true,
+      transparent: false,
+      backgroundColor: '#111827',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    });
+
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.on('close', (e) => {
+      if (!isClosingProgrammatically) {
+        e.preventDefault();
+      }
+    });
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(lockHtml)}`);
+    win.show();
+    lockWindows.push(win);
+  }
+}
+
+function destroyLockWindow() {
+  isClosingProgrammatically = true;
+  for (const win of lockWindows) {
+    if (win && !win.isDestroyed()) {
+      win.close();
+    }
+  }
+  lockWindows = [];
+  lockActive = false;
+  isClosingProgrammatically = false;
 }
 
 // ─── Device Registration ──────────────────────────────────────────────────────
@@ -452,7 +664,7 @@ async function connectSignalR() {
     return;
   }
 
-  const signalR = require('@microsoft/signalr');
+  const signalR = require('@microsoft/signalr/dist/cjs/index.js');
 
   signalRConnection = new signalR.HubConnectionBuilder()
     .withUrl(`${SERVER_URL}/hubs/remote-control?deviceId=${deviceId}`, {
@@ -520,12 +732,12 @@ async function connectSignalR() {
     if (enabled) {
       createBlackoutWindow(progressInfo);
       if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write("b 1\n");
+        inputWorker.stdin.write("h\n");
       }
     } else {
       destroyBlackoutWindow();
       if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write("b 0\n");
+        inputWorker.stdin.write("r\n");
       }
     }
   });
@@ -749,6 +961,28 @@ async function executePowerCommand(command) {
     lock: process.platform === 'win32' ? 'rundll32.exe user32.dll,LockWorkStation' : '',
     taskmgr: process.platform === 'win32' ? 'taskmgr.exe' : ''
   };
+
+  if (command === 'lock') {
+    if (process.platform === 'win32') {
+      if (lockActive) {
+        destroyLockWindow();
+      } else {
+        createLockWindow();
+      }
+    }
+    return;
+  }
+
+  if (command === 'cad') {
+    if (lockActive) {
+      destroyLockWindow();
+    } else {
+      const cmd = cmds.cad;
+      if (cmd) exec(cmd);
+    }
+    return;
+  }
+
   const cmd = cmds[command];
   if (cmd) exec(cmd);
 }

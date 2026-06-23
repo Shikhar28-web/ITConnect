@@ -178,7 +178,6 @@ function RemoteSessionPage() {
   const [connected, setConnected] = useState(false);
   const [activeTab, setActiveTab] = useState('remote'); // remote | terminal | processes | files | chat
   const [blackout, setBlackout] = useState(false);
-  const [privacyMode, setPrivacyMode] = useState(false);
   const [annotation, setAnnotation] = useState(false);
   const [zoom, setZoom] = useState(100);
   const [files, setFiles] = useState([]);
@@ -269,6 +268,9 @@ function RemoteSessionPage() {
     setDevice(d);
     const s = await sessionsApi.getById(parseInt(sessionId));
     setSession(s);
+    if (s) {
+      setBlackout(s.blackoutMode);
+    }
   }
 
   async function initWebRTC() {
@@ -360,30 +362,37 @@ function RemoteSessionPage() {
 
   async function toggleBlackout() {
     const newVal = !blackout;
-    setBlackout(newVal);
-    await signalRService.setBlackout(parseInt(deviceId), parseInt(sessionId), newVal,
-      newVal ? 'IT maintenance in progress. Please wait.' : null);
-    toast.info(newVal ? '🖤 Screen blackout enabled' : '✅ Blackout removed');
-  }
-
-  async function togglePrivacy() {
-    const newVal = !privacyMode;
-    setPrivacyMode(newVal);
-    await signalRService.setPrivacyMode(parseInt(deviceId), parseInt(sessionId), newVal);
-    toast.info(newVal ? '🔒 Privacy mode ON' : '🔓 Privacy mode OFF');
-  }
-
-  async function handleClipboardSync() {
-    const text = await window.electronAPI?.clipboardRead();
-    if (text) {
-      await signalRService.syncClipboard(parseInt(deviceId), text);
-      toast.success('Clipboard synced to remote');
+    try {
+      await signalRService.setBlackout(parseInt(deviceId), parseInt(sessionId), newVal,
+        newVal ? 'IT maintenance in progress. Please wait.' : null);
+      setBlackout(newVal);
+      toast.info(newVal ? '🖤 Screen blackout enabled' : '✅ Blackout removed');
+    } catch (e) {
+      toast.error('Failed to change blackout state');
     }
   }
 
-  async function handleClipboardPull() {
-    await signalRService.requestClipboard(parseInt(deviceId));
-    toast.info('Requesting clipboard from remote PC...');
+  async function handleClipboardSync() {
+    let text = '';
+    try {
+      if (window.electronAPI) {
+        text = await window.electronAPI.clipboardRead();
+      } else if (navigator.clipboard) {
+        text = await navigator.clipboard.readText();
+      }
+    } catch (err) {
+      console.warn('Failed to read local clipboard:', err);
+    }
+    if (text) {
+      try {
+        await signalRService.syncClipboard(parseInt(deviceId), text);
+        toast.success('Clipboard synced to remote');
+      } catch (err) {
+        toast.error('Failed to sync clipboard');
+      }
+    } else {
+      toast.warn('Local clipboard is empty or access was denied');
+    }
   }
 
   const toggleFullscreen = () => {
@@ -672,12 +681,6 @@ function RemoteSessionPage() {
                   title="Screen Blackout"
                   onClick={toggleBlackout}
                 >🖤</button>
-                <button
-                  id="btn-privacy"
-                  className={`toolbar-btn ${privacyMode ? 'active' : ''}`}
-                  title="Privacy Mode"
-                  onClick={togglePrivacy}
-                >🔒</button>
               </div>
 
               <div className="toolbar-group">
@@ -701,8 +704,7 @@ function RemoteSessionPage() {
               </div>
 
               <div className="toolbar-group">
-                <button id="btn-clipboard" className="toolbar-btn" title="Sync Clipboard to Remote" onClick={handleClipboardSync}>📋📤</button>
-                <button id="btn-clipboard-pull" className="toolbar-btn" title="Get Clipboard from Remote" onClick={handleClipboardPull}>📋📥</button>
+                <button id="btn-clipboard" className="toolbar-btn" title="Sync Clipboard" onClick={handleClipboardSync}>📋</button>
               </div>
 
               <div className="toolbar-group" style={{ marginLeft: 'auto' }}>
