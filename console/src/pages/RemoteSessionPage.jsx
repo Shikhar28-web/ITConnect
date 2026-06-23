@@ -4,6 +4,8 @@ import { toast } from 'react-toastify';
 import { devices as devicesApi, sessions as sessionsApi } from '../services/api';
 import { signalRService } from '../services/signalr';
 
+const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function TerminalPanel({ deviceId, sessionId }) {
@@ -179,6 +181,10 @@ function RemoteSessionPage() {
   const [privacyMode, setPrivacyMode] = useState(false);
   const [annotation, setAnnotation] = useState(false);
   const [zoom, setZoom] = useState(100);
+  const [files, setFiles] = useState([]);
+  const [currentPath, setCurrentPath] = useState('C:\\');
+  const [fileLoading, setFileLoading] = useState(false);
+  const [transferringFile, setTransferringFile] = useState(null);
 
   const videoRef = useRef(null);
   const peerRef = useRef(null);
@@ -201,6 +207,30 @@ function RemoteSessionPage() {
       initialized.current = false;
     };
   }, [deviceId]);
+
+  useEffect(() => {
+    const handleDirListing = (e) => {
+      if (Array.isArray(e.detail)) {
+        setFiles(e.detail);
+      } else if (e.detail && e.detail.error) {
+        toast.error(`Error: ${e.detail.error}`);
+        setFiles([]);
+      } else {
+        setFiles([]);
+      }
+      setFileLoading(false);
+    };
+    window.addEventListener('directory-listing', handleDirListing);
+
+    if (connected) {
+      setFileLoading(true);
+      signalRService.listDirectory(parseInt(deviceId), currentPath);
+    }
+
+    return () => {
+      window.removeEventListener('directory-listing', handleDirListing);
+    };
+  }, [connected, deviceId]);
 
   async function loadDevice() {
     const d = await devicesApi.getById(parseInt(deviceId));
@@ -232,6 +262,25 @@ function RemoteSessionPage() {
       onRegistryData: (json) => {
         window.dispatchEvent(new CustomEvent('registry-data', { detail: JSON.parse(json) }));
       },
+      onClipboardData: (text) => {
+        if (window.electronAPI) {
+          window.electronAPI.clipboardWrite(text);
+        } else {
+          navigator.clipboard.writeText(text);
+        }
+        toast.success('Clipboard copied from remote PC!');
+      },
+      onFileDownloadReady: (fileId, fileName) => {
+        const downloadUrl = `${BASE_URL}/api/files/download/${fileId}?name=${encodeURIComponent(fileName)}`;
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.setAttribute('download', fileName);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        toast.success(`Downloaded: ${fileName}`);
+        setTransferringFile(null);
+      }
     });
 
     // Create RTCPeerConnection
@@ -298,6 +347,23 @@ function RemoteSessionPage() {
       toast.success('Clipboard synced to remote');
     }
   }
+
+  async function handleClipboardPull() {
+    await signalRService.requestClipboard(parseInt(deviceId));
+    toast.info('Requesting clipboard from remote PC...');
+  }
+
+  const toggleFullscreen = () => {
+    const wrap = document.querySelector('.viewer-canvas-wrap');
+    if (!wrap) return;
+    if (!document.fullscreenElement) {
+      wrap.requestFullscreen().catch((err) => {
+        toast.error(`Error enabling fullscreen: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
 
   // Mouse/keyboard relay
   const handleMouseMove = useCallback(async (e) => {
@@ -439,6 +505,7 @@ function RemoteSessionPage() {
         {[
           { id: 'remote', icon: '🖥️', label: 'Remote View' },
           { id: 'terminal', icon: '💻', label: 'Terminal' },
+          { id: 'files', icon: '📁', label: 'File Explorer' },
           { id: 'chat', icon: '💬', label: 'Chat' },
         ].map(tab => (
           <button
@@ -490,10 +557,12 @@ function RemoteSessionPage() {
                 <span style={{ fontSize: 12, padding: '0 4px', color: 'var(--text-muted)' }}>{zoom}%</span>
                 <button className="toolbar-btn" title="Zoom In" onClick={() => setZoom(z => Math.min(200, z + 10))}>+</button>
                 <button className="toolbar-btn" title="Fit" onClick={() => setZoom(100)}>⊡</button>
+                <button className="toolbar-btn" title="Toggle Fullscreen" onClick={toggleFullscreen}>⛶</button>
               </div>
 
               <div className="toolbar-group">
-                <button id="btn-clipboard" className="toolbar-btn" title="Sync Clipboard" onClick={handleClipboardSync}>📋</button>
+                <button id="btn-clipboard" className="toolbar-btn" title="Sync Clipboard to Remote" onClick={handleClipboardSync}>📋📤</button>
+                <button id="btn-clipboard-pull" className="toolbar-btn" title="Get Clipboard from Remote" onClick={handleClipboardPull}>📋📥</button>
               </div>
 
               <div className="toolbar-group" style={{ marginLeft: 'auto' }}>
@@ -560,6 +629,107 @@ function RemoteSessionPage() {
         {activeTab === 'terminal' && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <TerminalPanel deviceId={parseInt(deviceId)} sessionId={parseInt(sessionId)} />
+          </div>
+        )}
+
+        {activeTab === 'files' && (
+          <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+            <div className="card-title">📁 Remote File Explorer</div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <input
+                className="form-input"
+                value={currentPath}
+                onChange={e => setCurrentPath(e.target.value)}
+                placeholder="Folder Path (e.g. C:\)"
+                style={{ flex: 1 }}
+              />
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => {
+                  setFileLoading(true);
+                  signalRService.listDirectory(parseInt(deviceId), currentPath);
+                }}
+              >Go / Refresh</button>
+            </div>
+            
+            {fileLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+                <div className="loading-spinner" />
+              </div>
+            ) : (
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Type</th>
+                      <th>Size</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Up one level */}
+                    <tr>
+                      <td
+                        style={{ cursor: 'pointer', color: 'var(--accent-blue)', fontWeight: 600 }}
+                        onClick={() => {
+                          const parts = currentPath.split('\\').filter(Boolean);
+                          if (parts.length > 1) {
+                            parts.pop();
+                            const newPath = parts.join('\\') + '\\';
+                            setCurrentPath(newPath);
+                            setFileLoading(true);
+                            signalRService.listDirectory(parseInt(deviceId), newPath);
+                          }
+                        }}
+                      >
+                        📁 .. (Up One Level)
+                      </td>
+                      <td>Folder</td>
+                      <td>—</td>
+                      <td>—</td>
+                    </tr>
+                    {files.map((file, i) => (
+                      <tr key={i}>
+                        <td
+                          style={{
+                            cursor: file.isDirectory ? 'pointer' : 'default',
+                            fontWeight: file.isDirectory ? 600 : 'normal',
+                            color: file.isDirectory ? 'var(--accent-blue)' : 'inherit'
+                          }}
+                          onClick={() => {
+                            if (file.isDirectory) {
+                              setCurrentPath(file.path);
+                              setFileLoading(true);
+                              signalRService.listDirectory(parseInt(deviceId), file.path);
+                            }
+                          }}
+                        >
+                          {file.isDirectory ? '📁' : '📄'} {file.name}
+                        </td>
+                        <td>{file.isDirectory ? 'Folder' : 'File'}</td>
+                        <td>{file.isDirectory ? '—' : `${(file.size / 1024).toFixed(1)} KB`}</td>
+                        <td>
+                          {!file.isDirectory && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              disabled={transferringFile !== null}
+                              onClick={async () => {
+                                setTransferringFile(file.name);
+                                toast.info(`Requesting file download: ${file.name}`);
+                                await signalRService.requestFileDownload(parseInt(deviceId), file.path);
+                              }}
+                            >
+                              {transferringFile === file.name ? '⏳ Preparing...' : '📥 Take File'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

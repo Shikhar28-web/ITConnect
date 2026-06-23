@@ -30,6 +30,7 @@ class SignalRService {
     if (handlers.onProcessList) this.remoteControlHub.on('ProcessList', handlers.onProcessList);
     if (handlers.onRegistryData) this.remoteControlHub.on('RegistryData', handlers.onRegistryData);
     if (handlers.onClipboardData) this.remoteControlHub.on('ClipboardData', handlers.onClipboardData);
+    if (handlers.onFileDownloadReady) this.remoteControlHub.on('FileDownloadReady', handlers.onFileDownloadReady);
 
     await this.remoteControlHub.start();
     return this.remoteControlHub.connectionId;
@@ -106,6 +107,10 @@ class SignalRService {
     await this.remoteControlHub?.invoke('SyncClipboard', deviceId.toString(), text);
   }
 
+  async requestClipboard(deviceId) {
+    await this.remoteControlHub?.invoke('RequestClipboard', deviceId.toString());
+  }
+
   async executeCommand(deviceId, sessionId, shell, command) {
     await this.remoteControlHub?.invoke('ExecuteCommand', deviceId.toString(), sessionId, shell, command);
   }
@@ -116,6 +121,10 @@ class SignalRService {
 
   async listDirectory(deviceId, path) {
     await this.remoteControlHub?.invoke('ListDirectory', deviceId.toString(), path);
+  }
+
+  async requestFileDownload(deviceId, filePath) {
+    await this.remoteControlHub?.invoke('RequestFileDownload', deviceId.toString(), filePath);
   }
 
   async getProcessList(deviceId) {

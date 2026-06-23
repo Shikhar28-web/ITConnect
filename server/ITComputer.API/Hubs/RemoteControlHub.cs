@@ -148,6 +148,14 @@ public class RemoteControlHub : Hub
             await Clients.Client(agentConnId).SendAsync("ClipboardSync", text);
     }
 
+    /// <summary>Engineer → Agent: Request clipboard content</summary>
+    public async Task RequestClipboard(string deviceId)
+    {
+        EnsureEngineer();
+        if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
+            await Clients.Client(agentConnId).SendAsync("RequestClipboard", Context.ConnectionId);
+    }
+
     /// <summary>Agent → Engineer: Return clipboard content</summary>
     public async Task ReturnClipboard(string engineerConnId, string text)
     {
@@ -204,6 +212,20 @@ public class RemoteControlHub : Hub
     public async Task SendDirectoryListing(string engineerConnId, string jsonListing)
     {
         await Clients.Client(engineerConnId).SendAsync("DirectoryListing", jsonListing);
+    }
+
+    /// <summary>Engineer → Agent: Request a file download</summary>
+    public async Task RequestFileDownload(string deviceId, string filePath)
+    {
+        EnsureEngineer();
+        if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
+            await Clients.Client(agentConnId).SendAsync("RequestFileDownload", filePath, Context.ConnectionId);
+    }
+
+    /// <summary>Agent → Engineer: Notify file is available for download</summary>
+    public async Task FileDownloadReady(string engineerConnId, string fileId, string fileName)
+    {
+        await Clients.Client(engineerConnId).SendAsync("FileDownloadReady", fileId, fileName);
     }
 
     /// <summary>Process management: list processes</summary>

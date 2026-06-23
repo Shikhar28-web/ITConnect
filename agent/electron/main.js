@@ -453,16 +453,16 @@ async function connectSignalR() {
   signalRConnection.on('MouseMove', async (x, y) => {
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.bounds;
-    const rx = Math.round((x / 10000) * width);
-    const ry = Math.round((y / 10000) * height);
+    const rx = Math.round((x / 10000) * (width - 1));
+    const ry = Math.round((y / 10000) * (height - 1));
     await injectMouseMove(rx, ry);
   });
 
   signalRConnection.on('MouseClick', async (x, y, button) => {
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.bounds;
-    const rx = Math.round((x / 10000) * width);
-    const ry = Math.round((y / 10000) * height);
+    const rx = Math.round((x / 10000) * (width - 1));
+    const ry = Math.round((y / 10000) * (height - 1));
     await injectMouseClick(rx, ry, button);
   });
 
@@ -504,6 +504,40 @@ async function connectSignalR() {
   signalRConnection.on('ListDirectory', async (dirPath, engineerConnId) => {
     const listing = await listDirectory(dirPath);
     await signalRConnection.invoke('SendDirectoryListing', engineerConnId, JSON.stringify(listing));
+  });
+
+  signalRConnection.on('RequestFileDownload', async (filePath, engineerConnId) => {
+    try {
+      if (fs.existsSync(filePath)) {
+        const fileBuffer = fs.readFileSync(filePath);
+        const { Blob } = require('buffer');
+        const fileBlob = new Blob([fileBuffer]);
+        const formData = new FormData();
+        formData.append('file', fileBlob, path.basename(filePath));
+
+        const response = await axios.post(`${SERVER_URL}/api/files/upload`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+
+        if (response.status === 200) {
+          const { fileId, fileName } = response.data;
+          await signalRConnection.invoke('FileDownloadReady', engineerConnId, fileId, fileName);
+        }
+      }
+    } catch (e) {
+      console.error('File download processing failed:', e.message);
+    }
+  });
+
+  signalRConnection.on('RequestClipboard', async (engineerConnId) => {
+    try {
+      const text = require('electron').clipboard.readText();
+      await signalRConnection.invoke('ReturnClipboard', engineerConnId, text);
+    } catch (e) {
+      console.error('RequestClipboard failed:', e.message);
+    }
   });
 
   signalRConnection.on('GetProcessList', async (engineerConnId) => {
