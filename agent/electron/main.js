@@ -660,12 +660,13 @@ function executeShellCommand(shell, command) {
 
 // ─── Power Commands ───────────────────────────────────────────────────────────
 async function executePowerCommand(command) {
+  const sasScriptPath = path.join(__dirname, 'send_sas.ps1');
   const cmds = {
     restart: process.platform === 'win32' ? 'shutdown /r /t 10' : 'sudo shutdown -r +1',
     shutdown: process.platform === 'win32' ? 'shutdown /s /t 10' : 'sudo shutdown -h +1',
     logoff: process.platform === 'win32' ? 'logoff' : 'pkill -u $(whoami)',
     safemode: 'bcdedit /set {current} safeboot minimal && shutdown /r /t 10',
-    cad: process.platform === 'win32' ? 'powershell -Command "Add-Type -TypeDefinition \'using System; using System.Runtime.InteropServices; public class SAS { [DllImport(\\\"sas.dll\\\")] public static extern void SendSAS(bool asUser); }\'; [SAS]::SendSAS($false)"' : '',
+    cad: process.platform === 'win32' ? `powershell -NoProfile -ExecutionPolicy Bypass -File "${sasScriptPath}"` : '',
     lock: process.platform === 'win32' ? 'rundll32.exe user32.dll,LockWorkStation' : '',
     taskmgr: process.platform === 'win32' ? 'taskmgr.exe' : ''
   };
