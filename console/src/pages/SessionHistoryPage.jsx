@@ -82,7 +82,6 @@ function SessionHistoryPage() {
               <th>Started</th>
               <th>Duration</th>
               <th>Recorded</th>
-              <th>Ticket</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -105,7 +104,6 @@ function SessionHistoryPage() {
                 </td>
                 <td>{getDuration(s.startedAt, s.endedAt)}</td>
                 <td>{s.isRecorded ? '🎬 Yes' : '—'}</td>
-                <td>{s.ticketId ? `#${s.ticketId}` : '—'}</td>
                 <td>
                   {s.isRecorded && s.status === 'Ended' && (
                     <button

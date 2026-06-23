@@ -10,7 +10,6 @@ import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import DevicesPage from './pages/DevicesPage';
 import RemoteSessionPage from './pages/RemoteSessionPage';
-import TicketsPage from './pages/TicketsPage';
 import UsersPage from './pages/UsersPage';
 import AuditLogsPage from './pages/AuditLogsPage';
 import ReportsPage from './pages/ReportsPage';
@@ -74,7 +73,6 @@ function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/devices" element={<DevicesPage />} />
               <Route path="/devices/:deviceId/session" element={<RemoteSessionPage />} />
-              <Route path="/tickets" element={<TicketsPage />} />
               <Route path="/users" element={<UsersPage />} />
               <Route path="/audit-logs" element={<AuditLogsPage />} />
               <Route path="/reports" element={<ReportsPage />} />

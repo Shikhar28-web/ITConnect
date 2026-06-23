@@ -308,17 +308,21 @@ function RemoteSessionPage() {
 
     const rect = videoRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const x = Math.round(((e.clientX - rect.left) / rect.width) * (device?.metrics?.monitorCount === 1 ? 1920 : 1920));
-    const y = Math.round(((e.clientY - rect.top) / rect.height) * 1080);
+    const ratioX = (e.clientX - rect.left) / rect.width;
+    const ratioY = (e.clientY - rect.top) / rect.height;
+    const x = Math.round(ratioX * 10000);
+    const y = Math.round(ratioY * 10000);
     await signalRService.sendMouseMove(parseInt(deviceId), x, y);
-  }, [annotation, connected, deviceId, device]);
+  }, [annotation, connected, deviceId]);
 
   const handleMouseClick = useCallback(async (e) => {
     if (annotation || !connected) return;
     const rect = videoRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const x = Math.round(((e.clientX - rect.left) / rect.width) * 1920);
-    const y = Math.round(((e.clientY - rect.top) / rect.height) * 1080);
+    const ratioX = (e.clientX - rect.left) / rect.width;
+    const ratioY = (e.clientY - rect.top) / rect.height;
+    const x = Math.round(ratioX * 10000);
+    const y = Math.round(ratioY * 10000);
     await signalRService.sendMouseClick(parseInt(deviceId), x, y, e.button);
   }, [annotation, connected, deviceId]);
 

@@ -472,11 +472,19 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('MouseMove', async (x, y) => {
-    await injectMouseMove(x, y);
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width, height } = primaryDisplay.bounds;
+    const rx = Math.round((x / 10000) * width);
+    const ry = Math.round((y / 10000) * height);
+    await injectMouseMove(rx, ry);
   });
 
   signalRConnection.on('MouseClick', async (x, y, button) => {
-    await injectMouseClick(x, y, button);
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width, height } = primaryDisplay.bounds;
+    const rx = Math.round((x / 10000) * width);
+    const ry = Math.round((y / 10000) * height);
+    await injectMouseClick(rx, ry, button);
   });
 
   signalRConnection.on('KeyEvent', async (key, isDown, ctrl, alt, shift) => {

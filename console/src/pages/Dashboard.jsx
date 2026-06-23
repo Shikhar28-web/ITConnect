@@ -65,8 +65,6 @@ function Dashboard() {
         <StatCard icon="🟢" value={stats?.onlineDevices ?? 0} label="Online" color="green" />
         <StatCard icon="🔴" value={stats?.offlineDevices ?? 0} label="Offline" color="red" />
         <StatCard icon="🔗" value={stats?.activeSessions ?? 0} label="Active Sessions" color="blue" />
-        <StatCard icon="🎫" value={stats?.openTickets ?? 0} label="Open Tickets" color="orange" />
-        <StatCard icon="🚨" value={stats?.criticalTickets ?? 0} label="Critical" color="red" />
         <StatCard icon="⚙️" value={`${stats?.avgCpuUsage ?? 0}%`} label="Avg CPU" color="blue" />
         <StatCard icon="💾" value={`${stats?.avgRamUsage ?? 0}%`} label="Avg RAM" color="green" />
       </div>

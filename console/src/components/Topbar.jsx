@@ -4,7 +4,6 @@ import { useLocation } from 'react-router-dom';
 const pageTitles = {
   '/dashboard': 'Dashboard',
   '/devices': 'Device Management',
-  '/tickets': 'Support Tickets',
   '/sessions': 'Session History',
   '/notifications': 'Notifications',
   '/users': 'User Management',
