@@ -684,13 +684,46 @@ async function executePowerCommand(command) {
 async function listDirectory(dirPath) {
   try {
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    return entries.map(e => ({
-      name: e.name,
-      isDirectory: e.isDirectory(),
-      path: path.join(dirPath, e.name),
-      size: e.isFile() ? fs.statSync(path.join(dirPath, e.name)).size : 0,
-      modified: fs.statSync(path.join(dirPath, e.name)).mtime
-    }));
+    const results = [];
+    for (const e of entries) {
+      try {
+        const fullPath = path.join(dirPath, e.name);
+        let size = 0;
+        let modified = null;
+        let isDirectory = false;
+
+        try {
+          isDirectory = e.isDirectory();
+        } catch {
+          // ignore
+        }
+
+        if (!isDirectory) {
+          try {
+            size = fs.statSync(fullPath).size;
+          } catch {
+            // size remains 0 if permission is denied
+          }
+        }
+
+        try {
+          modified = fs.statSync(fullPath).mtime;
+        } catch {
+          // modified remains null if permission is denied
+        }
+
+        results.push({
+          name: e.name,
+          isDirectory: isDirectory,
+          path: fullPath,
+          size: size,
+          modified: modified
+        });
+      } catch (err) {
+        // Skip entry entirely if it fails unexpectedly
+      }
+    }
+    return results;
   } catch (e) {
     return { error: e.message };
   }
