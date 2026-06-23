@@ -185,6 +185,7 @@ function RemoteSessionPage() {
   const [currentPath, setCurrentPath] = useState('C:\\');
   const [fileLoading, setFileLoading] = useState(false);
   const [transferringFile, setTransferringFile] = useState(null);
+  const [showCadDropdown, setShowCadDropdown] = useState(false);
 
   const videoRef = useRef(null);
   const peerRef = useRef(null);
@@ -231,6 +232,18 @@ function RemoteSessionPage() {
       window.removeEventListener('directory-listing', handleDirListing);
     };
   }, [connected, deviceId]);
+
+  // Handle click outside dropdown to close it
+  useEffect(() => {
+    if (!showCadDropdown) return;
+    const handleOutsideClick = (e) => {
+      if (!e.target.closest('#btn-cad-dropdown')) {
+        setShowCadDropdown(false);
+      }
+    };
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, [showCadDropdown]);
 
   async function loadDevice() {
     const d = await devicesApi.getById(parseInt(deviceId));
@@ -565,7 +578,140 @@ function RemoteSessionPage() {
                 <button id="btn-clipboard-pull" className="toolbar-btn" title="Get Clipboard from Remote" onClick={handleClipboardPull}>📋📥</button>
               </div>
 
-              <div className="toolbar-group" style={{ marginLeft: 'auto' }}>
+              <div className="toolbar-group" style={{ marginLeft: 'auto', position: 'relative' }}>
+                <button
+                  id="btn-cad-dropdown"
+                  className="toolbar-btn danger"
+                  title="Ctrl+Alt+Del Options"
+                  onClick={() => setShowCadDropdown(!showCadDropdown)}
+                  style={{ width: 'auto', padding: '0 8px', display: 'flex', gap: '4px', alignItems: 'center' }}
+                >
+                  <span>⌨️ CAD</span>
+                  <span style={{ fontSize: 9 }}>▼</span>
+                </button>
+                
+                {showCadDropdown && (
+                  <div
+                    className="cad-dropdown-menu"
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      right: 4,
+                      marginTop: 8,
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-sm)',
+                      boxShadow: 'var(--shadow-lg)',
+                      zIndex: 100,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      minWidth: 170,
+                      overflow: 'hidden'
+                    }}
+                  >
+                    <button
+                      className="cad-dropdown-item"
+                      style={{
+                        padding: '8px 12px',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-primary)',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        transition: 'background 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                      onClick={() => {
+                        signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'cad');
+                        setShowCadDropdown(false);
+                        toast.info('Sending Ctrl+Alt+Delete command to remote host...');
+                      }}
+                    >
+                      ⌨️ Send Ctrl+Alt+Del
+                    </button>
+                    <button
+                      className="cad-dropdown-item"
+                      style={{
+                        padding: '8px 12px',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-primary)',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        transition: 'background 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                      onClick={() => {
+                        signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'lock');
+                        setShowCadDropdown(false);
+                        toast.info('Locking workstation...');
+                      }}
+                    >
+                      🔒 Lock Workstation
+                    </button>
+                    <button
+                      className="cad-dropdown-item"
+                      style={{
+                        padding: '8px 12px',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-primary)',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        transition: 'background 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                      onClick={() => {
+                        signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'taskmgr');
+                        setShowCadDropdown(false);
+                        toast.info('Opening Task Manager...');
+                      }}
+                    >
+                      ⚙️ Open Task Manager
+                    </button>
+                    <button
+                      className="cad-dropdown-item"
+                      style={{
+                        padding: '8px 12px',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-primary)',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        transition: 'background 0.2s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                      onClick={() => {
+                        signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'logoff');
+                        setShowCadDropdown(false);
+                        toast.info('Signing out remote user...');
+                      }}
+                    >
+                      👤 Sign Out (Log Off)
+                    </button>
+                  </div>
+                )}
+
                 <button
                   className="toolbar-btn danger"
                   title="Restart"
@@ -576,11 +722,6 @@ function RemoteSessionPage() {
                   title="Shutdown"
                   onClick={() => signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'shutdown')}
                 >⏻</button>
-                <button
-                  className="toolbar-btn danger"
-                  title="Log Off"
-                  onClick={() => signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'logoff')}
-                >👤</button>
               </div>
             </div>
 

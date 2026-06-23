@@ -78,11 +78,11 @@ app.on('quit', () => {
 });
 
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  if (url.startsWith('https://localhost') || 
-      url.startsWith('https://127.0.0.1') || 
-      url.includes('192.168.') || 
-      url.includes('10.') || 
-      url.includes('172.')) {
+  if (url.startsWith('https://localhost') ||
+    url.startsWith('https://127.0.0.1') ||
+    url.includes('192.168.') ||
+    url.includes('10.') ||
+    url.includes('172.')) {
     event.preventDefault();
     callback(true);
   } else {
@@ -212,7 +212,7 @@ while ($line = [Console]::ReadLine()) {
 
   inputWorker = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', '-']);
   inputWorker.stdin.write(initScript + '\n');
-  
+
   inputWorker.on('error', (err) => {
     console.error('Input worker error:', err);
   });
@@ -265,17 +265,7 @@ function createBlackoutWindow(progressInfo) {
         .ticket { margin-top: 20px; font-size: 14px; color: #4A9EFF; }
       </style>
     </head>
-    <body>
-      <div class="logo">🖥️</div>
-      <div class="company">IT Department</div>
-      <div class="title">Maintenance In Progress</div>
-      <div class="message">
-        Your issue is currently being resolved by the IT Department.<br>
-        Please wait while maintenance is in progress.
-      </div>
-      <div class="progress-bar"><div class="progress-fill"></div></div>
-      <div class="info">${progressInfo || 'Please do not power off your computer.'}</div>
-    </body>
+   
     </html>
   `;
 
@@ -415,7 +405,7 @@ function getCPUUsage() {
       const idleDiff = end.reduce((acc, cpu, i) => acc + (cpu.times.idle - start[i].times.idle), 0);
       const totalDiff = end.reduce((acc, cpu, i) =>
         acc + Object.values(cpu.times).reduce((s, t) => s + t, 0)
-            - Object.values(start[i].times).reduce((s, t) => s + t, 0), 0);
+        - Object.values(start[i].times).reduce((s, t) => s + t, 0), 0);
       resolve(100 - (idleDiff / totalDiff) * 100);
     }, 1000);
   });
@@ -659,8 +649,8 @@ function executeShellCommand(shell, command) {
     const cmd = shell === 'powershell'
       ? `powershell -NonInteractive -Command "${command}"`
       : shell === 'bash'
-      ? `bash -c "${command}"`
-      : command;
+        ? `bash -c "${command}"`
+        : command;
 
     exec(cmd, { timeout: 30000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({ stdout: stdout || '', stderr: err?.message || stderr || '' });
@@ -674,7 +664,10 @@ async function executePowerCommand(command) {
     restart: process.platform === 'win32' ? 'shutdown /r /t 10' : 'sudo shutdown -r +1',
     shutdown: process.platform === 'win32' ? 'shutdown /s /t 10' : 'sudo shutdown -h +1',
     logoff: process.platform === 'win32' ? 'logoff' : 'pkill -u $(whoami)',
-    safemode: 'bcdedit /set {current} safeboot minimal && shutdown /r /t 10'
+    safemode: 'bcdedit /set {current} safeboot minimal && shutdown /r /t 10',
+    cad: process.platform === 'win32' ? 'powershell -Command "Add-Type -TypeDefinition \'using System; using System.Runtime.InteropServices; public class SAS { [DllImport(\\\"sas.dll\\\")] public static extern void SendSAS(bool asUser); }\'; [SAS]::SendSAS($false)"' : '',
+    lock: process.platform === 'win32' ? 'rundll32.exe user32.dll,LockWorkStation' : '',
+    taskmgr: process.platform === 'win32' ? 'taskmgr.exe' : ''
   };
   const cmd = cmds[command];
   if (cmd) exec(cmd);
