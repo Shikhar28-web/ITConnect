@@ -67,6 +67,7 @@ app.whenReady().then(async () => {
   }
   await registerDevice();
   await connectSignalR();
+  startClipboardMonitor();
 });
 
 app.on('window-all-closed', (e) => {
@@ -477,6 +478,7 @@ async function connectSignalR() {
   signalRConnection.on('setprivacymode', handleSetPrivacyMode);
 
   signalRConnection.on('ClipboardSync', (text) => {
+    lastClipboardText = text;
     require('electron').clipboard.writeText(text);
   });
 
@@ -782,4 +784,23 @@ ipcMain.handle('get-desktop-stream-id', async () => {
   const sources = await desktopCapturer.getSources({ types: ['screen'] });
   return sources[0]?.id;
 });
+
+// ─── Auto Clipboard Sync ──────────────────────────────────────────────────────
+let lastClipboardText = '';
+
+function startClipboardMonitor() {
+  setInterval(async () => {
+    try {
+      if (!signalRConnection || signalRConnection.state !== 'Connected' || !deviceId) return;
+      const currentText = require('electron').clipboard.readText();
+      if (currentText && currentText !== lastClipboardText) {
+        lastClipboardText = currentText;
+        console.log('Clipboard changed on agent, syncing to server...');
+        await signalRConnection.invoke('AgentSyncClipboard', deviceId.toString(), currentText);
+      }
+    } catch (err) {
+      console.warn('Clipboard auto-sync failed:', err.message);
+    }
+  }, 1000);
+}
 

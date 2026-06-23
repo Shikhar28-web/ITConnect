@@ -78,6 +78,7 @@ public class RemoteControlHub : Hub
         EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
         {
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"device_{deviceId}");
             await Clients.Client(agentConnId).SendAsync("ReceiveOffer", Context.ConnectionId, sdp);
         }
     }
@@ -146,6 +147,12 @@ public class RemoteControlHub : Hub
         EnsureEngineer();
         if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
             await Clients.Client(agentConnId).SendAsync("ClipboardSync", text);
+    }
+
+    /// <summary>Agent → Engineer: Auto sync clipboard to connected engineers</summary>
+    public async Task AgentSyncClipboard(string deviceId, string text)
+    {
+        await Clients.OthersInGroup($"device_{deviceId}").SendAsync("ClipboardData", text);
     }
 
     /// <summary>Engineer → Agent: Request clipboard content</summary>

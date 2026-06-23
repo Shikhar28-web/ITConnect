@@ -193,6 +193,7 @@ function RemoteSessionPage() {
   const isDrawing = useRef(false);
   const lastPos = useRef(null);
   const lastMouseMoveTime = useRef(0);
+  const lastClipboardRef = useRef('');
 
   const initialized = useRef(false);
 
@@ -245,6 +246,24 @@ function RemoteSessionPage() {
     return () => document.removeEventListener('click', handleOutsideClick);
   }, [showCadDropdown]);
 
+  // Auto sync admin clipboard to remote agent
+  useEffect(() => {
+    if (!connected || !window.electronAPI) return;
+    const interval = setInterval(async () => {
+      try {
+        const currentText = await window.electronAPI.clipboardRead();
+        if (currentText && currentText !== lastClipboardRef.current) {
+          lastClipboardRef.current = currentText;
+          await signalRService.syncClipboard(parseInt(deviceId), currentText);
+        }
+      } catch (err) {
+        // ignore
+      }
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [connected, deviceId]);
+
   async function loadDevice() {
     const d = await devicesApi.getById(parseInt(deviceId));
     setDevice(d);
@@ -276,12 +295,13 @@ function RemoteSessionPage() {
         window.dispatchEvent(new CustomEvent('registry-data', { detail: JSON.parse(json) }));
       },
       onClipboardData: (text) => {
+        lastClipboardRef.current = text;
         if (window.electronAPI) {
           window.electronAPI.clipboardWrite(text);
         } else {
           navigator.clipboard.writeText(text);
         }
-        toast.success('Clipboard copied from remote PC!');
+        toast.success('Clipboard synced from remote PC', { toastId: 'clipboard-sync' });
       },
       onFileDownloadReady: (fileId, fileName) => {
         const downloadUrl = `${BASE_URL}/api/files/download/${fileId}?name=${encodeURIComponent(fileName)}`;
