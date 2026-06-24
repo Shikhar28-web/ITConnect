@@ -246,6 +246,18 @@ function App() {
       }
     });
 
+    // Handle incoming lock screen frame captures from main process
+    const unsubscribeImage = window.electronAPI.onLockScreenImage((base64Data) => {
+      // Stop lock screen overlay animation to avoid overwriting the image
+      stopLockAnimation();
+
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      };
+      img.src = 'data:image/jpeg;base64,' + base64Data;
+    });
+
     // Handle lock/unlock state transitions dynamically
     const unsubscribeLockStatus = window.electronAPI.onLockStatusChanged(async (isLocked) => {
       console.log('Lock status changed to:', isLocked);
@@ -285,6 +297,7 @@ function App() {
       if (unsubscribe) unsubscribe();
       if (unsubscribePrivacy) unsubscribePrivacy();
       if (unsubscribeLockStatus) unsubscribeLockStatus();
+      if (unsubscribeImage) unsubscribeImage();
       stopLockAnimation();
       if (currentStreamRef.current && currentStreamRef.current !== canvasStream) {
         currentStreamRef.current.getTracks().forEach(t => t.stop());

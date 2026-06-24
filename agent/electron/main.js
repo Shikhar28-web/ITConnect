@@ -42,6 +42,7 @@ let inputWorker = null;
 let signalRConnection = null;
 let deviceId = null;
 let isSessionLocked = false;
+let lockScreenCaptureInterval = null;
 
 // UI Status tracking
 let uiStatus = { connected: false, message: 'Connecting to server...', sessionActive: false, engineerName: '' };
@@ -84,6 +85,7 @@ app.whenReady().then(async () => {
     powerMonitor.on('lock-screen', () => {
       console.log('System lock detected');
       isSessionLocked = true;
+      startLockScreenCaptureLoop();
       // Notify the renderer so it can display lock overlay in admin console
       mainWindow?.webContents.send('lock-status-changed', true);
     });
@@ -91,6 +93,7 @@ app.whenReady().then(async () => {
     powerMonitor.on('unlock-screen', () => {
       console.log('System unlock detected');
       isSessionLocked = false;
+      stopLockScreenCaptureLoop();
       mainWindow?.webContents.send('lock-status-changed', false);
     });
   }
@@ -181,11 +184,25 @@ function startInputWorker() {
   if (process.platform !== 'win32') return;
 
   const initScript = `
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Windows.Forms;
 
 public class Win32Input {
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr OpenInputDesktop(uint dwFlags, bool fInherit, uint dwDesiredAccess);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetThreadDesktop(IntPtr hDesktop);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool CloseDesktop(IntPtr hDesktop);
+
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int x, int y);
 
@@ -198,6 +215,12 @@ public class Win32Input {
     [DllImport("user32.dll")]
     public static extern bool BlockInput(bool fBlockIt);
 
+    [DllImport("sas.dll", SetLastError = true)]
+    public static extern void SendSAS(bool asUser);
+
+    [DllImport("user32.dll")]
+    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
     public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
@@ -205,50 +228,134 @@ public class Win32Input {
     public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
     public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
     public const uint MOUSEEVENTF_WHEEL = 0x0800;
+    public const uint SPI_SETCURSORS = 0x0057;
 
-    public static void Move(int x, int y) { SetCursorPos(x, y); }
+    private const uint DESKTOP_WRITEOBJECTS = 0x0080;
+    private const uint DESKTOP_READOBJECTS = 0x0001;
+    private const uint DESKTOP_CREATEMENU = 0x0004;
+    private const uint DESKTOP_HOOKCONTROL = 0x0008;
+    private const uint DESKTOP_JOURNALRECORD = 0x0010;
+    private const uint DESKTOP_JOURNALPLAYBACK = 0x0020;
+    private const uint DESKTOP_ENUMERATE = 0x0040;
+    private const uint DESKTOP_SWITCHDESKTOP = 0x0100;
+
+    private const uint ALL_ACCESS = DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS | DESKTOP_CREATEMENU | 
+                                    DESKTOP_HOOKCONTROL | DESKTOP_JOURNALRECORD | DESKTOP_JOURNALPLAYBACK | 
+                                    DESKTOP_ENUMERATE | DESKTOP_SWITCHDESKTOP;
+
+    private static void Execute(Action action) {
+        Thread t = new Thread(() => {
+            IntPtr hInput = OpenInputDesktop(0, false, ALL_ACCESS);
+            if (hInput != IntPtr.Zero) {
+                if (SetThreadDesktop(hInput)) {
+                    try {
+                        action();
+                    } catch {}
+                }
+                CloseDesktop(hInput);
+            } else {
+                try { action(); } catch {}
+            }
+        });
+        t.SetApartmentState(ApartmentState.STA);
+        t.Start();
+        t.Join();
+    }
+
+    public static void Move(int x, int y) {
+        Execute(() => { SetCursorPos(x, y); });
+    }
 
     public static void Click(int x, int y, int button) {
-        SetCursorPos(x, y);
-        uint down = MOUSEEVENTF_LEFTDOWN, up = MOUSEEVENTF_LEFTUP;
-        if (button == 2) { down = MOUSEEVENTF_RIGHTDOWN; up = MOUSEEVENTF_RIGHTUP; }
-        else if (button == 1) { down = MOUSEEVENTF_MIDDLEDOWN; up = MOUSEEVENTF_MIDDLEUP; }
-        mouse_event(down, 0, 0, 0, 0);
-        System.Threading.Thread.Sleep(15);
-        mouse_event(up, 0, 0, 0, 0);
+        Execute(() => {
+            SetCursorPos(x, y);
+            uint down = MOUSEEVENTF_LEFTDOWN, up = MOUSEEVENTF_LEFTUP;
+            if (button == 2) { down = MOUSEEVENTF_RIGHTDOWN; up = MOUSEEVENTF_RIGHTUP; }
+            else if (button == 1) { down = MOUSEEVENTF_MIDDLEDOWN; up = MOUSEEVENTF_MIDDLEUP; }
+            mouse_event(down, 0, 0, 0, 0);
+            Thread.Sleep(15);
+            mouse_event(up, 0, 0, 0, 0);
+        });
     }
 
     public static void MouseDown(int x, int y, int button) {
-        SetCursorPos(x, y);
-        uint flag = MOUSEEVENTF_LEFTDOWN;
-        if (button == 2) flag = MOUSEEVENTF_RIGHTDOWN;
-        else if (button == 1) flag = MOUSEEVENTF_MIDDLEDOWN;
-        mouse_event(flag, 0, 0, 0, 0);
+        Execute(() => {
+            SetCursorPos(x, y);
+            uint flag = MOUSEEVENTF_LEFTDOWN;
+            if (button == 2) flag = MOUSEEVENTF_RIGHTDOWN;
+            else if (button == 1) flag = MOUSEEVENTF_MIDDLEDOWN;
+            mouse_event(flag, 0, 0, 0, 0);
+        });
     }
 
     public static void MouseUp(int x, int y, int button) {
-        SetCursorPos(x, y);
-        uint flag = MOUSEEVENTF_LEFTUP;
-        if (button == 2) flag = MOUSEEVENTF_RIGHTUP;
-        else if (button == 1) flag = MOUSEEVENTF_MIDDLEUP;
-        mouse_event(flag, 0, 0, 0, 0);
+        Execute(() => {
+            SetCursorPos(x, y);
+            uint flag = MOUSEEVENTF_LEFTUP;
+            if (button == 2) flag = MOUSEEVENTF_RIGHTUP;
+            else if (button == 1) flag = MOUSEEVENTF_MIDDLEUP;
+            mouse_event(flag, 0, 0, 0, 0);
+        });
     }
 
     public static void MouseWheel(int delta) {
-        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)delta, 0);
+        Execute(() => {
+            mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)delta, 0);
+        });
     }
 
-    [DllImport("user32.dll")]
-    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
-
-    public const uint SPI_SETCURSORS = 0x0057;
+    public static void SetBlockInput(bool block) {
+        Execute(() => {
+            BlockInput(block);
+        });
+    }
 
     public static void RestoreGlobalCursor() {
-        SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+        Execute(() => {
+            SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+        });
+    }
+
+    public static void SendKeysWait(string keys) {
+        Execute(() => {
+            try {
+                SendKeys.SendWait(keys);
+            } catch {}
+        });
+    }
+
+    public static void SendCad() {
+        Execute(() => {
+            try {
+                SendSAS(false);
+            } catch {
+                keybd_event(0x11, 0, 0, 0); // Ctrl Down
+                keybd_event(0x12, 0, 0, 0); // Alt Down
+                keybd_event(0x2E, 0, 1, 0); // Delete Down
+                Thread.Sleep(100);
+                keybd_event(0x2E, 0, 1 | 2, 0); // Delete Up
+                keybd_event(0x12, 0, 2, 0); // Alt Up
+                keybd_event(0x11, 0, 2, 0); // Ctrl Up
+            }
+        });
+    }
+
+    public static void CaptureScreen(string filePath) {
+        Execute(() => {
+            try {
+                int width = Screen.PrimaryScreen.Bounds.Width;
+                int height = Screen.PrimaryScreen.Bounds.Height;
+                using (Bitmap bmp = new Bitmap(width, height)) {
+                    using (Graphics g = Graphics.FromImage(bmp)) {
+                        g.CopyFromScreen(0, 0, 0, 0, bmp.Size);
+                    }
+                    bmp.Save(filePath, ImageFormat.Jpeg);
+                }
+            } catch {}
+        });
     }
 }
-"@
-Add-Type -AssemblyName System.Windows.Forms
+"@ -ReferencedAssemblies System.Windows.Forms, System.Drawing
 
 while ($line = [Console]::ReadLine()) {
     try {
@@ -265,12 +372,17 @@ while ($line = [Console]::ReadLine()) {
         } elseif ($parts[0] -eq 'w') {
             [Win32Input]::MouseWheel([int]$parts[1])
         } elseif ($parts[0] -eq 'b') {
-            [Win32Input]::BlockInput([int]$parts[1] -eq 1)
+            [Win32Input]::SetBlockInput([int]$parts[1] -eq 1)
         } elseif ($parts[0] -eq 'r') {
             [Win32Input]::RestoreGlobalCursor()
         } elseif ($parts[0] -eq 'k') {
             $keyStr = $line.Substring(2)
-            [System.Windows.Forms.SendKeys]::SendWait($keyStr)
+            [Win32Input]::SendKeysWait($keyStr)
+        } elseif ($parts[0] -eq 'cad') {
+            [Win32Input]::SendCad()
+        } elseif ($parts[0] -eq 'capture') {
+            $path = $line.Substring(8)
+            [Win32Input]::CaptureScreen($path)
         }
     } catch {
         # ignore error
@@ -371,6 +483,9 @@ function createBlackoutWindow(progressInfo) {
     
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
     win.show();
+    if (process.platform === 'win32') {
+      win.setContentProtection(true);
+    }
 
     blackoutWindows.push(win);
   }
@@ -387,6 +502,49 @@ function destroyBlackoutWindow() {
   if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
     inputWorker.stdin.write("b 0\n");
     inputWorker.stdin.write("r\n");
+  }
+}
+
+// ─── Lock Screen Capture Loop ─────────────────────────────────────────────────
+function startLockScreenCaptureLoop() {
+  if (lockScreenCaptureInterval) return;
+  
+  const screenshotFile = 'C:\\Users\\Public\\ITComputer\\lockscreen.jpg';
+  const dir = path.dirname(screenshotFile);
+  if (!fs.existsSync(dir)) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch (e) {}
+  }
+
+  try { if (fs.existsSync(screenshotFile)) fs.unlinkSync(screenshotFile); } catch (e) {}
+
+  lockScreenCaptureInterval = setInterval(() => {
+    if (!isSessionLocked) {
+      stopLockScreenCaptureLoop();
+      return;
+    }
+    
+    if (inputWorker && !inputWorker.killed) {
+      inputWorker.stdin.write(`capture ${screenshotFile}\n`);
+    }
+    
+    setTimeout(() => {
+      if (fs.existsSync(screenshotFile)) {
+        try {
+          const data = fs.readFileSync(screenshotFile);
+          const base64 = data.toString('base64');
+          mainWindow?.webContents.send('lock-screen-image', base64);
+        } catch (err) {}
+      }
+    }, 300);
+  }, 1000);
+}
+
+function stopLockScreenCaptureLoop() {
+  if (lockScreenCaptureInterval) {
+    clearInterval(lockScreenCaptureInterval);
+    lockScreenCaptureInterval = null;
   }
 }
 
@@ -989,12 +1147,9 @@ async function executePowerCommand(command) {
     if (lockActive) {
       destroyLockWindow();
     } else {
-      // Use the send_sas.ps1 script to send Ctrl+Alt+Del (requires SoftwareSASGeneration = 3 in registry)
-      const sasScriptPath = path.join(__dirname, 'send_sas.ps1');
-      exec(`powershell -NoProfile -ExecutionPolicy Bypass -File "${sasScriptPath}"`, (err) => {
-        if (err) console.warn('SendSAS failed:', err.message);
-        else console.log('SendSAS executed successfully.');
-      });
+      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+        inputWorker.stdin.write("cad\n");
+      }
     }
     return;
   }
