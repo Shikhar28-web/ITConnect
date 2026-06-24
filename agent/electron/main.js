@@ -67,6 +67,12 @@ function updateUiStatus(connected, message, sessionActive = undefined, engineerN
 // ─── App Ready ────────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   if (process.platform === 'win32') {
+    // Automatically enable Software SAS Generation (Ctrl+Alt+Delete simulation policy) in the registry
+    exec('reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v SoftwareSASGeneration /t REG_DWORD /d 3 /f', (err) => {
+      if (err) console.warn('Failed to set SoftwareSASGeneration in registry:', err.message);
+      else console.log('Successfully enabled SoftwareSASGeneration in registry');
+    });
+
     startSecureDesktopServer();
     launchSecureDesktopHelper();
   }

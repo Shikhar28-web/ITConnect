@@ -2,12 +2,34 @@ param(
     [int]$Port = 59300
 )
 
+# Logging function
+function Log-Message {
+    param([string]$Message)
+    try {
+        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        Add-Content -Path "C:\Users\Public\secure_desktop_debug.log" -Value "[$timestamp] $Message"
+    } catch {}
+}
+
+# Clean old log
+try {
+    Remove-Item "C:\Users\Public\secure_desktop_debug.log" -ErrorAction SilentlyContinue
+} catch {}
+
+Log-Message "Helper script started. Port: $Port"
+
 # Load assemblies for PowerShell runspace
-Add-Type -AssemblyName System.Drawing
-Add-Type -AssemblyName System.Windows.Forms
+try {
+    Add-Type -AssemblyName System.Drawing
+    Add-Type -AssemblyName System.Windows.Forms
+    Log-Message "Loaded System.Drawing and System.Windows.Forms"
+} catch {
+    Log-Message "Error loading assemblies: $_"
+}
 
 # Add C# helper class for Win32 API interactions with explicit assembly references for compilation
-Add-Type -ReferencedAssemblies "System.Drawing", "System.Windows.Forms" -TypeDefinition @"
+try {
+    Add-Type -ReferencedAssemblies "System.Drawing", "System.Windows.Forms" -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -163,11 +185,17 @@ public class Win32 {
     }
 }
 "@
+    Log-Message "Win32 C# type added successfully"
+} catch {
+    Log-Message "Error adding Win32 C# type: $_"
+}
 
 # Connect to the Electron TCP server
 $client = New-Object System.Net.Sockets.TcpClient
 try {
+    Log-Message "Connecting to 127.0.0.1:$Port"
     $client.Connect("127.0.0.1", $Port)
+    Log-Message "Connected to TCP server successfully"
     $stream = $client.GetStream()
     $reader = New-Object System.IO.StreamReader($stream)
     $writer = New-Object System.IO.StreamWriter($stream)
@@ -177,6 +205,7 @@ try {
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen
     $width = $screen.Bounds.Width
     $height = $screen.Bounds.Height
+    Log-Message "Primary screen bounds: Width=$width, Height=$height"
 
     # Start main loop
     while ($client.Connected) {
@@ -185,6 +214,7 @@ try {
             while ($stream.DataAvailable) {
                 $line = $reader.ReadLine()
                 if ($line) {
+                    Log-Message "Received input command: $line"
                     # Ensure the calling thread switches to the input desktop before executing injection
                     $canSwitch = $false
                     [Win32]::GetActiveDesktopName([ref]$canSwitch)
@@ -211,24 +241,30 @@ try {
             $canSwitch = $false
             $name = [Win32]::GetActiveDesktopName([ref]$canSwitch)
 
+            # Send active desktop name to Electron
             $writer.WriteLine("desktop:$name")
 
             # 3. Capture screen if we are on a secure/Winlogon desktop
             if ($name -ne "Default" -and $name -ne "unknown") {
+                Log-Message "Active desktop is secure: $name. Capturing..."
                 $bytes = [Win32]::CaptureScreen($width, $height, 60)
                 if ($bytes -and $bytes.Length -gt 0) {
+                    Log-Message "Capture succeeded, bytes: $($bytes.Length)"
                     $base64 = [Convert]::ToBase64String($bytes)
                     $writer.WriteLine("frame:$base64")
+                } else {
+                    Log-Message "Capture returned 0 bytes"
                 }
             }
         } catch {
-            # Prevent loop crash, sleep slightly and continue
+            Log-Message "Error in main loop iteration: $_"
         }
         
         Start-Sleep -Milliseconds 250
     }
+    Log-Message "Socket connection closed"
 } catch {
-    # Socket connection failed
+    Log-Message "Socket connection failed: $_"
 } finally {
     if ($client) { $client.Close() }
 }
