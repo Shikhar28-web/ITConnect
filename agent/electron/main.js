@@ -235,7 +235,11 @@ public class Win32Input {
     [DllImport("user32.dll")]
     public static extern int GetSystemMetrics(int nIndex);
 
+    [DllImport("user32.dll")]
+    public static extern uint SetWindowDisplayAffinity(IntPtr hwnd, uint dwAffinity);
+
     public const uint SPI_SETCURSORS = 0x0057;
+    public const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
 
     public static readonly uint[] CursorIds = { 32512, 32513, 32514, 32515, 32516, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650, 32651 };
 
@@ -264,6 +268,10 @@ public class Win32Input {
     public static void RestoreGlobalCursor() {
         SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
     }
+
+    public static void ExcludeFromCapture(IntPtr hwnd) {
+        SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+    }
 }
 "@
 Add-Type -AssemblyName System.Windows.Forms
@@ -291,6 +299,9 @@ while ($line = [Console]::ReadLine()) {
         } elseif ($parts[0] -eq 'k') {
             $keyStr = $line.Substring(2)
             [System.Windows.Forms.SendKeys]::SendWait($keyStr)
+        } elseif ($parts[0] -eq 'e') {
+            $hwnd = [IntPtr][long]$parts[1]
+            [Win32Input]::ExcludeFromCapture($hwnd)
         }
     } catch {
         # ignore error
@@ -305,6 +316,15 @@ while ($line = [Console]::ReadLine()) {
   inputWorker.on('error', (err) => {
     console.error('Input worker error:', err);
   });
+}
+
+// Helper to get HWND as a safe string (handles 64-bit and 32-bit platforms)
+function getHwndString(win) {
+  const buf = win.getNativeWindowHandle();
+  if (buf.length === 8) {
+    return buf.readBigInt64LE(0).toString();
+  }
+  return buf.readInt32LE(0).toString();
 }
 
 // ─── Blackout Overlay Window ──────────────────────────────────────────────────
@@ -382,9 +402,14 @@ function createBlackoutWindow(progressInfo) {
 
     win.setIgnoreMouseEvents(true);
     win.setAlwaysOnTop(true, 'screen-saver');
-    win.setContentProtection(true);
+    
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
     win.show();
+
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      const hwnd = getHwndString(win);
+      inputWorker.stdin.write(`e ${hwnd}\n`);
+    }
 
     blackoutWindows.push(win);
   }
@@ -397,6 +422,11 @@ function destroyBlackoutWindow() {
     }
   }
   blackoutWindows = [];
+
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write("b 0\n");
+    inputWorker.stdin.write("r\n");
+  }
 }
 
 // ─── Custom Lock Overlay Window ───────────────────────────────────────────────
@@ -507,6 +537,15 @@ function createLockWindow() {
           IT Session Active
         </div>
       </div>
+      <script>
+        window.addEventListener('keydown', (e) => {
+          const blockedKeys = ['Tab', 'Alt', 'Meta', 'F4', 'Escape'];
+          if (blockedKeys.includes(e.key) || (e.altKey && e.key === 'F4')) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }, true);
+      </script>
     </body>
     </html>
   `;
@@ -518,11 +557,11 @@ function createLockWindow() {
       y: d.bounds.y,
       width: d.bounds.width,
       height: d.bounds.height,
-      fullscreen: true,
+      fullscreen: false, // Keep false to prevent DWM composition from disabling (keeps WebRTC capture working!)
       alwaysOnTop: true,
       frame: false,
       skipTaskbar: true,
-      kiosk: true,
+      focusable: true,
       transparent: false,
       backgroundColor: '#111827',
       webPreferences: {
@@ -531,6 +570,7 @@ function createLockWindow() {
       }
     });
 
+    win.setIgnoreMouseEvents(true);
     win.setAlwaysOnTop(true, 'screen-saver');
     win.on('close', (e) => {
       if (!isClosingProgrammatically) {
@@ -539,7 +579,18 @@ function createLockWindow() {
     });
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(lockHtml)}`);
     win.show();
+
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      const hwnd = getHwndString(win);
+      inputWorker.stdin.write(`e ${hwnd}\n`);
+    }
+
     lockWindows.push(win);
+  }
+
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write("b 1\n");
+    inputWorker.stdin.write("h\n");
   }
 }
 
@@ -553,6 +604,11 @@ function destroyLockWindow() {
   lockWindows = [];
   lockActive = false;
   isClosingProgrammatically = false;
+
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write("b 0\n");
+    inputWorker.stdin.write("r\n");
+  }
 }
 
 // ─── Device Registration ──────────────────────────────────────────────────────
@@ -732,11 +788,13 @@ async function connectSignalR() {
     if (enabled) {
       createBlackoutWindow(progressInfo);
       if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+        inputWorker.stdin.write("b 1\n");
         inputWorker.stdin.write("h\n");
       }
     } else {
       destroyBlackoutWindow();
       if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+        inputWorker.stdin.write("b 0\n");
         inputWorker.stdin.write("r\n");
       }
     }
@@ -852,6 +910,8 @@ async function connectSignalR() {
   signalRConnection.onclose(() => {
     updateTrayStatus('Disconnected');
     updateUiStatus(false, 'Disconnected from control channel');
+    destroyBlackoutWindow();
+    destroyLockWindow();
   });
 
   try {

@@ -273,52 +273,16 @@ function RemoteSessionPage() {
     }
   }
 
-  async function initWebRTC() {
-    // Connect SignalR for remote control
-    const connId = await signalRService.connectRemoteControl({
-      onAnswer: async (sdp) => {
-        await peerRef.current?.setRemoteDescription({ type: 'answer', sdp });
-        setConnected(true);
-      },
-      onIceCandidate: async (candidateJson) => {
-        const candidate = JSON.parse(candidateJson);
-        await peerRef.current?.addIceCandidate(candidate);
-      },
-      onCommandOutput: (output, isError) => {
-        window.dispatchEvent(new CustomEvent('command-output', { detail: { output, isError } }));
-      },
-      onDirectoryListing: (json) => {
-        window.dispatchEvent(new CustomEvent('directory-listing', { detail: JSON.parse(json) }));
-      },
-      onProcessList: (json) => {
-        window.dispatchEvent(new CustomEvent('process-list', { detail: JSON.parse(json) }));
-      },
-      onRegistryData: (json) => {
-        window.dispatchEvent(new CustomEvent('registry-data', { detail: JSON.parse(json) }));
-      },
-      onClipboardData: (text) => {
-        lastClipboardRef.current = text;
-        if (window.electronAPI) {
-          window.electronAPI.clipboardWrite(text);
-        } else {
-          navigator.clipboard.writeText(text);
-        }
-        toast.success('Clipboard synced from remote PC', { toastId: 'clipboard-sync' });
-      },
-      onFileDownloadReady: (fileId, fileName) => {
-        const downloadUrl = `${BASE_URL}/api/files/download/${fileId}?name=${encodeURIComponent(fileName)}`;
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.setAttribute('download', fileName);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        toast.success(`Downloaded: ${fileName}`);
-        setTransferringFile(null);
-      }
-    });
+  async function startPeerConnection() {
+    if (peerRef.current) {
+      try {
+        peerRef.current.close();
+      } catch (e) {}
+      peerRef.current = null;
+    }
 
-    // Create RTCPeerConnection
+    setConnected(false);
+
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
@@ -331,9 +295,20 @@ function RemoteSessionPage() {
     };
 
     pc.onicecandidate = async (event) => {
-      if (event.candidate) {
-        // Find agent connection ID via API
-        await signalRService.sendIceCandidate('agent', event.candidate);
+      if (event.candidate && peerRef.current === pc) {
+        await signalRService.sendIceCandidate('agent', event.candidate).catch(() => {});
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log('ICE connection state:', pc.iceConnectionState);
+      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+        console.warn('WebRTC connection lost. Auto-reconnecting in 3 seconds...');
+        setTimeout(() => {
+          if (peerRef.current === pc && (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected')) {
+            startPeerConnection().catch(e => console.warn('Auto-reconnect failed:', e.message));
+          }
+        }, 3000);
       }
     };
 
@@ -343,10 +318,76 @@ function RemoteSessionPage() {
     await signalRService.sendOffer(parseInt(deviceId), offer.sdp);
   }
 
+  async function initWebRTC() {
+    // Connect SignalR for remote control (only if not already connected)
+    if (!signalRService.remoteControlHub) {
+      await signalRService.connectRemoteControl({
+        onAnswer: async (sdp) => {
+          await peerRef.current?.setRemoteDescription({ type: 'answer', sdp });
+          setConnected(true);
+        },
+        onIceCandidate: async (candidateJson) => {
+          const candidate = JSON.parse(candidateJson);
+          await peerRef.current?.addIceCandidate(candidate).catch(() => {});
+        },
+        onCommandOutput: (output, isError) => {
+          window.dispatchEvent(new CustomEvent('command-output', { detail: { output, isError } }));
+        },
+        onDirectoryListing: (json) => {
+          window.dispatchEvent(new CustomEvent('directory-listing', { detail: JSON.parse(json) }));
+        },
+        onProcessList: (json) => {
+          window.dispatchEvent(new CustomEvent('process-list', { detail: JSON.parse(json) }));
+        },
+        onRegistryData: (json) => {
+          window.dispatchEvent(new CustomEvent('registry-data', { detail: JSON.parse(json) }));
+        },
+        onClipboardData: (text) => {
+          lastClipboardRef.current = text;
+          if (window.electronAPI) {
+            window.electronAPI.clipboardWrite(text);
+          } else {
+            navigator.clipboard.writeText(text);
+          }
+          toast.success('Clipboard synced from remote PC', { toastId: 'clipboard-sync' });
+        },
+        onFileDownloadReady: (fileId, fileName) => {
+          const downloadUrl = `${BASE_URL}/api/files/download/${fileId}?name=${encodeURIComponent(fileName)}`;
+          const link = document.createElement('a');
+          link.href = downloadUrl;
+          link.setAttribute('download', fileName);
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          toast.success(`Downloaded: ${fileName}`);
+          setTransferringFile(null);
+        }
+      });
+    }
+
+    await startPeerConnection();
+  }
+
   function cleanup() {
-    peerRef.current?.close();
+    if (peerRef.current) {
+      try {
+        peerRef.current.close();
+      } catch (e) {}
+      peerRef.current = null;
+    }
     if (signalRService.remoteControlHub) {
-       signalRService.remoteControlHub.stop().catch(() => {});
+      signalRService.remoteControlHub.stop().catch(() => {});
+      signalRService.remoteControlHub = null;
+    }
+  }
+
+  async function handleReconnect() {
+    toast.info('Reconnecting remote stream...');
+    try {
+      await startPeerConnection();
+      toast.success('Remote stream reconnected');
+    } catch (err) {
+      toast.error(`Reconnection failed: ${err.message}`);
     }
   }
 
@@ -445,41 +486,6 @@ function RemoteSessionPage() {
     const x = Math.round(clampedX * 10000);
     const y = Math.round(clampedY * 10000);
     await signalRService.sendMouseMove(parseInt(deviceId), x, y);
-  }, [annotation, connected, deviceId]);
-
-  const handleMouseClick = useCallback(async (e) => {
-    if (annotation || !connected) return;
-    const video = videoRef.current;
-    const rect = video?.getBoundingClientRect();
-    if (!rect || video.videoWidth === 0 || video.videoHeight === 0) return;
-
-    const videoRatio = video.videoWidth / video.videoHeight;
-    const rectRatio = rect.width / rect.height;
-    let contentWidth = rect.width;
-    let contentHeight = rect.height;
-    let contentLeft = rect.left;
-    let contentTop = rect.top;
-
-    if (rectRatio > videoRatio) {
-      // Pillarbox (black bars on left/right)
-      contentWidth = rect.height * videoRatio;
-      contentLeft = rect.left + (rect.width - contentWidth) / 2;
-    } else {
-      // Letterbox (black bars on top/bottom)
-      contentHeight = rect.width / videoRatio;
-      contentTop = rect.top + (rect.height - contentHeight) / 2;
-    }
-
-    const ratioX = (e.clientX - contentLeft) / contentWidth;
-    const ratioY = (e.clientY - contentTop) / contentHeight;
-    
-    // Clamp ratios to [0, 1] to prevent out of bounds clicks
-    const clampedX = Math.max(0, Math.min(1, ratioX));
-    const clampedY = Math.max(0, Math.min(1, ratioY));
-
-    const x = Math.round(clampedX * 10000);
-    const y = Math.round(clampedY * 10000);
-    await signalRService.sendMouseClick(parseInt(deviceId), x, y, e.button);
   }, [annotation, connected, deviceId]);
 
   const handleMouseDown = useCallback(async (e) => {
@@ -671,7 +677,7 @@ function RemoteSessionPage() {
       {/* Main Content */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', gap: 12 }}>
         {activeTab === 'remote' && (
-          <div className="remote-viewer" style={{ flex: 1, borderRadius: 12, overflow: 'hidden' }}>
+          <div className="remote-viewer" style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRadius: 12, overflow: 'hidden' }}>
             {/* Toolbar */}
             <div className="viewer-toolbar">
               <div className="toolbar-group">
@@ -705,6 +711,12 @@ function RemoteSessionPage() {
 
               <div className="toolbar-group">
                 <button id="btn-clipboard" className="toolbar-btn" title="Sync Clipboard" onClick={handleClipboardSync}>📋</button>
+                <button
+                  className="toolbar-btn"
+                  title="Reconnect Stream"
+                  onClick={handleReconnect}
+                  style={{ width: 'auto', padding: '0 8px', display: 'flex', gap: '4px', fontSize: '12px' }}
+                >🔄 Reconnect</button>
               </div>
 
               <div className="toolbar-group" style={{ marginLeft: 'auto' }}>
@@ -765,16 +777,15 @@ function RemoteSessionPage() {
               className="viewer-canvas-wrap"
               tabIndex={0}
               onKeyDown={handleKeyDown}
-              style={{ position: 'relative' }}
+              style={{ position: 'relative', flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#000', overflow: 'hidden' }}
             >
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 className="viewer-canvas"
-                style={{ transform: `scale(${zoom / 100})`, cursor: 'default' }}
+                style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'default' }}
                 onMouseMove={handleMouseMove}
-                onClick={handleMouseClick}
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
                 onWheel={handleWheel}
