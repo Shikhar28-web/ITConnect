@@ -64,6 +64,11 @@ function updateUiStatus(connected, message, sessionActive = undefined, engineerN
   }
 }
 
+app.isQuitting = false;
+app.on('before-quit', () => {
+  app.isQuitting = true;
+});
+
 // ─── App Ready ────────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   if (process.platform === 'win32') {
@@ -334,6 +339,15 @@ while ($line = [Console]::ReadLine()) {
   inputWorker.on('error', (err) => {
     console.error('Input worker error:', err);
   });
+
+  inputWorker.on('close', (code) => {
+    console.log(`Input worker exited with code ${code}`);
+    inputWorker = null;
+    if (!app.isQuitting) {
+      console.log('Input worker exited unexpectedly. Restarting in 3 seconds...');
+      setTimeout(startInputWorker, 3000);
+    }
+  });
 }
 
 function startSecureDesktopServer() {
@@ -391,42 +405,27 @@ function launchSecureDesktopHelper() {
   const helperScriptPath = path.join(__dirname, 'secure_desktop_helper.ps1');
   const port = 59300;
 
-  console.log('Registering and running secure desktop helper as SYSTEM task...');
+  console.log('Launching secure desktop helper as child process in active session...');
+  secureDesktopHelperProcess = spawn('powershell', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', helperScriptPath,
+    '-Port', port.toString()
+  ]);
+  
+  secureDesktopHelperProcess.on('error', (spawnErr) => {
+    console.error('Failed to spawn helper child process:', spawnErr);
+    secureDesktopHelperProcess = null;
+  });
 
-  const registerCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Register-ScheduledTask -TaskName 'ITComputerSecureDesktopHelper' -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -File \\"${helperScriptPath}\\" -Port ${port}') -Principal (New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\\SYSTEM' -LogonType ServiceAccount -RunLevel Highest) -Force"`;
-  const runCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-ScheduledTask -TaskName 'ITComputerSecureDesktopHelper'"`;
-
-  exec(registerCmd, (err) => {
-    if (err) {
-      console.warn('Failed to register SYSTEM scheduled task:', err.message);
-      console.log('Falling back to launching helper as normal child process...');
-      secureDesktopHelperProcess = spawn('powershell', [
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', helperScriptPath,
-        '-Port', port.toString()
-      ]);
-      
-      secureDesktopHelperProcess.on('error', (spawnErr) => {
-        console.error('Failed to spawn helper child process:', spawnErr);
-        secureDesktopHelperProcess = null;
-      });
-
-      secureDesktopHelperProcess.on('close', (code) => {
-        console.log(`Secure desktop helper child process exited with code ${code}`);
-        secureDesktopHelperProcess = null;
-      });
-      return;
+  secureDesktopHelperProcess.on('close', (code) => {
+    console.log(`Secure desktop helper child process exited with code ${code}`);
+    secureDesktopHelperProcess = null;
+    if (!app.isQuitting) {
+      console.log('Secure desktop helper child process exited. Restarting in 5 seconds...');
+      setTimeout(launchSecureDesktopHelper, 5000);
     }
-
-    exec(runCmd, (runErr) => {
-      if (runErr) {
-        console.error('Failed to start secure desktop scheduled task:', runErr.message);
-      } else {
-        console.log('SYSTEM secure desktop helper scheduled task started successfully');
-      }
-    });
   });
 }
 
@@ -436,11 +435,6 @@ function stopSecureDesktopHelper() {
     secureDesktopHelperProcess.kill();
     secureDesktopHelperProcess = null;
   }
-
-  const stopCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Stop-ScheduledTask -TaskName 'ITComputerSecureDesktopHelper' -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName 'ITComputerSecureDesktopHelper' -Confirm:$false -ErrorAction SilentlyContinue"`;
-  exec(stopCmd, () => {
-    console.log('Scheduled task cleanup finished');
-  });
 
   if (secureDesktopSocket) {
     secureDesktopSocket.destroy();

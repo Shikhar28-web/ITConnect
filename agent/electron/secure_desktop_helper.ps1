@@ -190,81 +190,91 @@ public class Win32 {
     Log-Message "Error adding Win32 C# type: $_"
 }
 
-# Connect to the Electron TCP server
-$client = New-Object System.Net.Sockets.TcpClient
-try {
-    Log-Message "Connecting to 127.0.0.1:$Port"
-    $client.Connect("127.0.0.1", $Port)
-    Log-Message "Connected to TCP server successfully"
-    $stream = $client.GetStream()
-    $reader = New-Object System.IO.StreamReader($stream)
-    $writer = New-Object System.IO.StreamWriter($stream)
-    $writer.AutoFlush = $true
+# Connect to the Electron TCP server in a robust retry loop
+while ($true) {
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        Log-Message "Connecting to 127.0.0.1:$Port"
+        $client.Connect("127.0.0.1", $Port)
+        Log-Message "Connected to TCP server successfully"
+        $stream = $client.GetStream()
+        $reader = New-Object System.IO.StreamReader($stream)
+        $writer = New-Object System.IO.StreamWriter($stream)
+        $writer.AutoFlush = $true
 
-    # Get primary screen size
-    $screen = [System.Windows.Forms.Screen]::PrimaryScreen
-    $width = $screen.Bounds.Width
-    $height = $screen.Bounds.Height
-    Log-Message "Primary screen bounds: Width=$width, Height=$height"
+        # Get primary screen size
+        $screen = [System.Windows.Forms.Screen]::PrimaryScreen
+        $width = $screen.Bounds.Width
+        $height = $screen.Bounds.Height
+        Log-Message "Primary screen bounds: Width=$width, Height=$height"
 
-    # Start main loop
-    while ($client.Connected) {
-        try {
-            # 1. Non-blocking input reading from socket
-            while ($stream.DataAvailable) {
-                $line = $reader.ReadLine()
-                if ($line) {
-                    Log-Message "Received input command: $line"
-                    # Ensure the calling thread switches to the input desktop before executing injection
-                    $canSwitch = $false
-                    [Win32]::GetActiveDesktopName([ref]$canSwitch)
+        # Start main loop
+        while ($client.Connected) {
+            try {
+                # 1. Non-blocking input reading from socket
+                while ($stream.DataAvailable) {
+                    $line = $reader.ReadLine()
+                    if ($line) {
+                        Log-Message "Received input command: $line"
+                        # Ensure the calling thread switches to the input desktop before executing injection
+                        $canSwitch = $false
+                        [Win32]::GetActiveDesktopName([ref]$canSwitch)
 
-                    $parts = $line.Split(' ')
-                    if ($parts[0] -eq 'm') {
-                        [Win32]::Move([int]$parts[1], [int]$parts[2])
-                    } elseif ($parts[0] -eq 'c') {
-                        [Win32]::Click([int]$parts[1], [int]$parts[2], [int]$parts[3])
-                    } elseif ($parts[0] -eq 'd') {
-                        [Win32]::MouseDown([int]$parts[1], [int]$parts[2], [int]$parts[3])
-                    } elseif ($parts[0] -eq 'u') {
-                        [Win32]::MouseUp([int]$parts[1], [int]$parts[2], [int]$parts[3])
-                    } elseif ($parts[0] -eq 'w') {
-                        [Win32]::MouseWheel([int]$parts[1])
-                    } elseif ($parts[0] -eq 'k') {
-                        $keyStr = $line.Substring(2)
-                        [System.Windows.Forms.SendKeys]::SendWait($keyStr)
+                        $parts = $line.Split(' ')
+                        if ($parts[0] -eq 'm') {
+                            [Win32]::Move([int]$parts[1], [int]$parts[2])
+                        } elseif ($parts[0] -eq 'c') {
+                            [Win32]::Click([int]$parts[1], [int]$parts[2], [int]$parts[3])
+                        } elseif ($parts[0] -eq 'd') {
+                            [Win32]::MouseDown([int]$parts[1], [int]$parts[2], [int]$parts[3])
+                        } elseif ($parts[0] -eq 'u') {
+                            [Win32]::MouseUp([int]$parts[1], [int]$parts[2], [int]$parts[3])
+                        } elseif ($parts[0] -eq 'w') {
+                            [Win32]::MouseWheel([int]$parts[1])
+                        } elseif ($parts[0] -eq 'k') {
+                            $keyStr = $line.Substring(2)
+                            [System.Windows.Forms.SendKeys]::SendWait($keyStr)
+                        }
                     }
                 }
-            }
 
-            # 2. Check active desktop
-            $canSwitch = $false
-            $name = [Win32]::GetActiveDesktopName([ref]$canSwitch)
+                # 2. Check active desktop
+                $canSwitch = $false
+                $name = [Win32]::GetActiveDesktopName([ref]$canSwitch)
 
-            # Send active desktop name to Electron
-            $writer.WriteLine("desktop:$name")
+                # Send active desktop name to Electron
+                $writer.WriteLine("desktop:$name")
 
-            # 3. Capture screen if we are on a secure/Winlogon desktop
-            if ($name -ne "Default" -and $name -ne "unknown") {
-                Log-Message "Active desktop is secure: $name. Capturing..."
-                $bytes = [Win32]::CaptureScreen($width, $height, 60)
-                if ($bytes -and $bytes.Length -gt 0) {
-                    Log-Message "Capture succeeded, bytes: $($bytes.Length)"
-                    $base64 = [Convert]::ToBase64String($bytes)
-                    $writer.WriteLine("frame:$base64")
-                } else {
-                    Log-Message "Capture returned 0 bytes"
+                # 3. Capture screen if we are on a secure/Winlogon desktop
+                if ($name -ne "Default" -and $name -ne "unknown") {
+                    Log-Message "Active desktop is secure: $name. Capturing..."
+                    $bytes = [Win32]::CaptureScreen($width, $height, 60)
+                    if ($bytes -and $bytes.Length -gt 0) {
+                        Log-Message "Capture succeeded, bytes: $($bytes.Length)"
+                        $base64 = [Convert]::ToBase64String($bytes)
+                        $writer.WriteLine("frame:$base64")
+                    } else {
+                        Log-Message "Capture returned 0 bytes"
+                    }
+                }
+            } catch {
+                Log-Message "Error in main loop iteration: $_"
+                # If it's a connection/socket write failure, exit inner loop to trigger reconnect
+                if ($_.Exception.Message -like "*transport connection*" -or $_.Exception.Message -like "*forcibly closed*") {
+                    break
                 }
             }
-        } catch {
-            Log-Message "Error in main loop iteration: $_"
+            
+            Start-Sleep -Milliseconds 250
         }
-        
-        Start-Sleep -Milliseconds 250
+        Log-Message "Socket connection closed"
+    } catch {
+        Log-Message "Socket connection failed: $_"
+    } finally {
+        if ($client) { $client.Close() }
     }
-    Log-Message "Socket connection closed"
-} catch {
-    Log-Message "Socket connection failed: $_"
-} finally {
-    if ($client) { $client.Close() }
+
+    # Wait 5 seconds before retrying connection
+    Start-Sleep -Seconds 5
 }
+
