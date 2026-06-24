@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, screen, desktopCapturer, powerMonitor } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, desktopCapturer } = require('electron');
 const path = require('path');
 const { exec, spawn } = require('child_process');
 const os = require('os');
@@ -41,8 +41,6 @@ let privacyModeActive = false;
 let inputWorker = null;
 let signalRConnection = null;
 let deviceId = null;
-let isSessionLocked = false;
-let lockScreenCaptureInterval = null;
 
 // UI Status tracking
 let uiStatus = { connected: false, message: 'Connecting to server...', sessionActive: false, engineerName: '' };
@@ -63,13 +61,6 @@ function updateUiStatus(connected, message, sessionActive = undefined, engineerN
 
 // ─── App Ready ────────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
-  if (process.platform === 'win32') {
-    // Ensure SoftwareSASGeneration policy allows software-initiated Ctrl+Alt+Del
-    exec('reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v SoftwareSASGeneration /t REG_DWORD /d 3 /f', (err) => {
-      if (err) console.warn('SoftwareSASGeneration registry set failed (need admin):', err.message);
-      else console.log('SoftwareSASGeneration registry policy set to 3.');
-    });
-  }
   startInputWorker();
   createTray();
   createMainWindow();
@@ -80,23 +71,6 @@ app.whenReady().then(async () => {
   await registerDevice();
   await connectSignalR();
   startClipboardMonitor();
-
-  if (process.platform === 'win32') {
-    powerMonitor.on('lock-screen', () => {
-      console.log('System lock detected');
-      isSessionLocked = true;
-      startLockScreenCaptureLoop();
-      // Notify the renderer so it can display lock overlay in admin console
-      mainWindow?.webContents.send('lock-status-changed', true);
-    });
-
-    powerMonitor.on('unlock-screen', () => {
-      console.log('System unlock detected');
-      isSessionLocked = false;
-      stopLockScreenCaptureLoop();
-      mainWindow?.webContents.send('lock-status-changed', false);
-    });
-  }
 });
 
 app.on('window-all-closed', (e) => {
@@ -184,25 +158,11 @@ function startInputWorker() {
   if (process.platform !== 'win32') return;
 
   const initScript = `
-Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
-using System.Threading;
-using System.Drawing;
-using System.Drawing.Imaging;
-using System.Windows.Forms;
 
 public class Win32Input {
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern IntPtr OpenInputDesktop(uint dwFlags, bool fInherit, uint dwDesiredAccess);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool SetThreadDesktop(IntPtr hDesktop);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool CloseDesktop(IntPtr hDesktop);
-
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int x, int y);
 
@@ -215,12 +175,6 @@ public class Win32Input {
     [DllImport("user32.dll")]
     public static extern bool BlockInput(bool fBlockIt);
 
-    [DllImport("sas.dll", SetLastError = true)]
-    public static extern void SendSAS(bool asUser);
-
-    [DllImport("user32.dll")]
-    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
-
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
     public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
@@ -228,134 +182,99 @@ public class Win32Input {
     public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
     public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
     public const uint MOUSEEVENTF_WHEEL = 0x0800;
-    public const uint SPI_SETCURSORS = 0x0057;
-
-    private const uint DESKTOP_WRITEOBJECTS = 0x0080;
-    private const uint DESKTOP_READOBJECTS = 0x0001;
-    private const uint DESKTOP_CREATEMENU = 0x0004;
-    private const uint DESKTOP_HOOKCONTROL = 0x0008;
-    private const uint DESKTOP_JOURNALRECORD = 0x0010;
-    private const uint DESKTOP_JOURNALPLAYBACK = 0x0020;
-    private const uint DESKTOP_ENUMERATE = 0x0040;
-    private const uint DESKTOP_SWITCHDESKTOP = 0x0100;
-
-    private const uint ALL_ACCESS = DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS | DESKTOP_CREATEMENU | 
-                                    DESKTOP_HOOKCONTROL | DESKTOP_JOURNALRECORD | DESKTOP_JOURNALPLAYBACK | 
-                                    DESKTOP_ENUMERATE | DESKTOP_SWITCHDESKTOP;
-
-    private static void Execute(Action action) {
-        Thread t = new Thread(() => {
-            IntPtr hInput = OpenInputDesktop(0, false, ALL_ACCESS);
-            if (hInput != IntPtr.Zero) {
-                if (SetThreadDesktop(hInput)) {
-                    try {
-                        action();
-                    } catch {}
-                }
-                CloseDesktop(hInput);
-            } else {
-                try { action(); } catch {}
-            }
-        });
-        t.SetApartmentState(ApartmentState.STA);
-        t.Start();
-        t.Join();
-    }
 
     public static void Move(int x, int y) {
-        Execute(() => { SetCursorPos(x, y); });
+        SetCursorPos(x, y);
     }
 
     public static void Click(int x, int y, int button) {
-        Execute(() => {
-            SetCursorPos(x, y);
-            uint down = MOUSEEVENTF_LEFTDOWN, up = MOUSEEVENTF_LEFTUP;
-            if (button == 2) { down = MOUSEEVENTF_RIGHTDOWN; up = MOUSEEVENTF_RIGHTUP; }
-            else if (button == 1) { down = MOUSEEVENTF_MIDDLEDOWN; up = MOUSEEVENTF_MIDDLEUP; }
-            mouse_event(down, 0, 0, 0, 0);
-            Thread.Sleep(15);
-            mouse_event(up, 0, 0, 0, 0);
-        });
+        SetCursorPos(x, y);
+        uint down = MOUSEEVENTF_LEFTDOWN;
+        uint up = MOUSEEVENTF_LEFTUP;
+        if (button == 2) {
+            down = MOUSEEVENTF_RIGHTDOWN;
+            up = MOUSEEVENTF_RIGHTUP;
+        } else if (button == 1) {
+            down = MOUSEEVENTF_MIDDLEDOWN;
+            up = MOUSEEVENTF_MIDDLEUP;
+        }
+        mouse_event(down, 0, 0, 0, 0);
+        System.Threading.Thread.Sleep(15);
+        mouse_event(up, 0, 0, 0, 0);
     }
 
     public static void MouseDown(int x, int y, int button) {
-        Execute(() => {
-            SetCursorPos(x, y);
-            uint flag = MOUSEEVENTF_LEFTDOWN;
-            if (button == 2) flag = MOUSEEVENTF_RIGHTDOWN;
-            else if (button == 1) flag = MOUSEEVENTF_MIDDLEDOWN;
-            mouse_event(flag, 0, 0, 0, 0);
-        });
+        SetCursorPos(x, y);
+        uint flag = MOUSEEVENTF_LEFTDOWN;
+        if (button == 2) flag = MOUSEEVENTF_RIGHTDOWN;
+        else if (button == 1) flag = MOUSEEVENTF_MIDDLEDOWN;
+        mouse_event(flag, 0, 0, 0, 0);
     }
 
     public static void MouseUp(int x, int y, int button) {
-        Execute(() => {
-            SetCursorPos(x, y);
-            uint flag = MOUSEEVENTF_LEFTUP;
-            if (button == 2) flag = MOUSEEVENTF_RIGHTUP;
-            else if (button == 1) flag = MOUSEEVENTF_MIDDLEUP;
-            mouse_event(flag, 0, 0, 0, 0);
-        });
+        SetCursorPos(x, y);
+        uint flag = MOUSEEVENTF_LEFTUP;
+        if (button == 2) flag = MOUSEEVENTF_RIGHTUP;
+        else if (button == 1) flag = MOUSEEVENTF_MIDDLEUP;
+        mouse_event(flag, 0, 0, 0, 0);
     }
 
     public static void MouseWheel(int delta) {
-        Execute(() => {
-            mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)delta, 0);
-        });
+        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)delta, 0);
     }
 
-    public static void SetBlockInput(bool block) {
-        Execute(() => {
-            BlockInput(block);
-        });
+    [DllImport("user32.dll")]
+    public static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetSystemCursor(IntPtr hcur, uint id);
+
+    [DllImport("user32.dll")]
+    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
+    [DllImport("user32.dll")]
+    public static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll")]
+    public static extern uint SetWindowDisplayAffinity(IntPtr hwnd, uint dwAffinity);
+
+    public const uint SPI_SETCURSORS = 0x0057;
+    public const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
+
+    public static readonly uint[] CursorIds = { 32512, 32513, 32514, 32515, 32516, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650, 32651 };
+
+    public static void HideGlobalCursor() {
+        int cx = GetSystemMetrics(13); // SM_CXCURSOR
+        int cy = GetSystemMetrics(14); // SM_CYCURSOR
+        if (cx <= 0) cx = 32;
+        if (cy <= 0) cy = 32;
+
+        int widthInBytes = ((cx + 15) / 16) * 2;
+        int numBytes = widthInBytes * cy;
+
+        byte[] andPlane = new byte[numBytes];
+        for (int i = 0; i < numBytes; i++) andPlane[i] = 0xFF;
+        byte[] xorPlane = new byte[numBytes];
+        for (int i = 0; i < numBytes; i++) xorPlane[i] = 0x00;
+        
+        foreach (uint id in CursorIds) {
+            IntPtr blank = CreateCursor(IntPtr.Zero, 0, 0, cx, cy, andPlane, xorPlane);
+            if (blank != IntPtr.Zero) {
+                SetSystemCursor(blank, id);
+            }
+        }
     }
 
     public static void RestoreGlobalCursor() {
-        Execute(() => {
-            SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
-        });
+        SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
     }
 
-    public static void SendKeysWait(string keys) {
-        Execute(() => {
-            try {
-                SendKeys.SendWait(keys);
-            } catch {}
-        });
-    }
-
-    public static void SendCad() {
-        Execute(() => {
-            try {
-                SendSAS(false);
-            } catch {
-                keybd_event(0x11, 0, 0, 0); // Ctrl Down
-                keybd_event(0x12, 0, 0, 0); // Alt Down
-                keybd_event(0x2E, 0, 1, 0); // Delete Down
-                Thread.Sleep(100);
-                keybd_event(0x2E, 0, 1 | 2, 0); // Delete Up
-                keybd_event(0x12, 0, 2, 0); // Alt Up
-                keybd_event(0x11, 0, 2, 0); // Ctrl Up
-            }
-        });
-    }
-
-    public static void CaptureScreen(string filePath) {
-        Execute(() => {
-            try {
-                int width = Screen.PrimaryScreen.Bounds.Width;
-                int height = Screen.PrimaryScreen.Bounds.Height;
-                using (Bitmap bmp = new Bitmap(width, height)) {
-                    using (Graphics g = Graphics.FromImage(bmp)) {
-                        g.CopyFromScreen(0, 0, 0, 0, bmp.Size);
-                    }
-                    bmp.Save(filePath, ImageFormat.Jpeg);
-                }
-            } catch {}
-        });
+    public static void ExcludeFromCapture(IntPtr hwnd) {
+        SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
     }
 }
-"@ -ReferencedAssemblies System.Windows.Forms, System.Drawing
+"@
+Add-Type -AssemblyName System.Windows.Forms
 
 while ($line = [Console]::ReadLine()) {
     try {
@@ -372,17 +291,17 @@ while ($line = [Console]::ReadLine()) {
         } elseif ($parts[0] -eq 'w') {
             [Win32Input]::MouseWheel([int]$parts[1])
         } elseif ($parts[0] -eq 'b') {
-            [Win32Input]::SetBlockInput([int]$parts[1] -eq 1)
+            [Win32Input]::BlockInput([int]$parts[1] -eq 1)
+        } elseif ($parts[0] -eq 'h') {
+            [Win32Input]::HideGlobalCursor()
         } elseif ($parts[0] -eq 'r') {
             [Win32Input]::RestoreGlobalCursor()
         } elseif ($parts[0] -eq 'k') {
             $keyStr = $line.Substring(2)
-            [Win32Input]::SendKeysWait($keyStr)
-        } elseif ($parts[0] -eq 'cad') {
-            [Win32Input]::SendCad()
-        } elseif ($parts[0] -eq 'capture') {
-            $path = $line.Substring(8)
-            [Win32Input]::CaptureScreen($path)
+            [System.Windows.Forms.SendKeys]::SendWait($keyStr)
+        } elseif ($parts[0] -eq 'e') {
+            $hwnd = [IntPtr][long]$parts[1]
+            [Win32Input]::ExcludeFromCapture($hwnd)
         }
     } catch {
         # ignore error
@@ -397,12 +316,15 @@ while ($line = [Console]::ReadLine()) {
   inputWorker.on('error', (err) => {
     console.error('Input worker error:', err);
   });
+}
 
-  inputWorker.on('exit', () => {
-    console.warn('Input worker exited unexpectedly, restarting...');
-    inputWorker = null;
-    setTimeout(startInputWorker, 2000);
-  });
+// Helper to get HWND as a safe string (handles 64-bit and 32-bit platforms)
+function getHwndString(win) {
+  const buf = win.getNativeWindowHandle();
+  if (buf.length === 8) {
+    return buf.readBigInt64LE(0).toString();
+  }
+  return buf.readInt32LE(0).toString();
 }
 
 // ─── Blackout Overlay Window ──────────────────────────────────────────────────
@@ -413,72 +335,47 @@ function createBlackoutWindow(progressInfo) {
     <!DOCTYPE html>
     <html>
     <head>
-      <meta charset="UTF-8">
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; cursor: none !important; }
         body {
           background: #000;
           color: #fff;
-          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
           height: 100vh;
-          width: 100vw;
-          position: relative;
+          font-family: 'Segoe UI', sans-serif;
+          user-select: none;
           cursor: none !important;
         }
-        #screensaver {
-          position: absolute;
-          font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
-          font-size: 32px;
-          font-weight: 300;
-          color: #555555;
-          white-space: nowrap;
-          user-select: none;
-          text-shadow: 0 0 8px rgba(255,255,255,0.15);
+        .logo { font-size: 48px; margin-bottom: 24px; }
+        .company { font-size: 28px; font-weight: 700; color: #4A9EFF; margin-bottom: 40px; }
+        .title { font-size: 22px; font-weight: 600; margin-bottom: 16px; }
+        .message { font-size: 16px; color: #aaa; text-align: center; max-width: 500px; line-height: 1.6; margin-bottom: 32px; }
+        .progress-bar {
+          width: 400px;
+          height: 8px;
+          background: #333;
+          border-radius: 4px;
+          overflow: hidden;
+          margin-bottom: 12px;
         }
+        .progress-fill {
+          height: 100%;
+          background: linear-gradient(90deg, #4A9EFF, #7B61FF);
+          border-radius: 4px;
+          animation: progress 3s ease-in-out infinite alternate;
+        }
+        @keyframes progress {
+          from { width: 20%; }
+          to { width: 90%; }
+        }
+        .info { font-size: 13px; color: #666; }
+        .ticket { margin-top: 20px; font-size: 14px; color: #4A9EFF; }
       </style>
     </head>
-    <body>
-      <div id="screensaver">Windows</div>
-      <script>
-        const el = document.getElementById('screensaver');
-        let w = window.innerWidth;
-        let h = window.innerHeight;
-        let x = Math.random() * (w - 200);
-        let y = Math.random() * (h - 50);
-        let dx = 1.5;
-        let dy = 1.5;
-        
-        function update() {
-          w = window.innerWidth;
-          h = window.innerHeight;
-          const rect = el.getBoundingClientRect();
-          
-          if (x + rect.width >= w || x <= 0) {
-            dx = -dx;
-          }
-          if (y + rect.height >= h || y <= 0) {
-            dy = -dy;
-          }
-          
-          x += dx;
-          y += dy;
-          
-          el.style.left = x + 'px';
-          el.style.top = y + 'px';
-          
-          requestAnimationFrame(update);
-        }
-        
-        window.addEventListener('resize', () => {
-          w = window.innerWidth;
-          h = window.innerHeight;
-          x = Math.min(x, w - el.offsetWidth);
-          y = Math.min(y, h - el.offsetHeight);
-        });
-        
-        requestAnimationFrame(update);
-      </script>
-    </body>
+   
     </html>
   `;
 
@@ -503,13 +400,15 @@ function createBlackoutWindow(progressInfo) {
       }
     });
 
-    win.setIgnoreMouseEvents(false);
+    win.setIgnoreMouseEvents(true);
     win.setAlwaysOnTop(true, 'screen-saver');
     
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
     win.show();
-    if (process.platform === 'win32') {
-      win.setContentProtection(true);
+
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      const hwnd = getHwndString(win);
+      inputWorker.stdin.write(`e ${hwnd}\n`);
     }
 
     blackoutWindows.push(win);
@@ -527,49 +426,6 @@ function destroyBlackoutWindow() {
   if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
     inputWorker.stdin.write("b 0\n");
     inputWorker.stdin.write("r\n");
-  }
-}
-
-// ─── Lock Screen Capture Loop ─────────────────────────────────────────────────
-function startLockScreenCaptureLoop() {
-  if (lockScreenCaptureInterval) return;
-  
-  const screenshotFile = 'C:\\Users\\Public\\ITComputer\\lockscreen.jpg';
-  const dir = path.dirname(screenshotFile);
-  if (!fs.existsSync(dir)) {
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-    } catch (e) {}
-  }
-
-  try { if (fs.existsSync(screenshotFile)) fs.unlinkSync(screenshotFile); } catch (e) {}
-
-  lockScreenCaptureInterval = setInterval(() => {
-    if (!isSessionLocked) {
-      stopLockScreenCaptureLoop();
-      return;
-    }
-    
-    if (inputWorker && !inputWorker.killed) {
-      inputWorker.stdin.write(`capture ${screenshotFile}\n`);
-    }
-    
-    setTimeout(() => {
-      if (fs.existsSync(screenshotFile)) {
-        try {
-          const data = fs.readFileSync(screenshotFile);
-          const base64 = data.toString('base64');
-          mainWindow?.webContents.send('lock-screen-image', base64);
-        } catch (err) {}
-      }
-    }, 300);
-  }, 1000);
-}
-
-function stopLockScreenCaptureLoop() {
-  if (lockScreenCaptureInterval) {
-    clearInterval(lockScreenCaptureInterval);
-    lockScreenCaptureInterval = null;
   }
 }
 
@@ -724,11 +580,17 @@ function createLockWindow() {
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(lockHtml)}`);
     win.show();
 
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      const hwnd = getHwndString(win);
+      inputWorker.stdin.write(`e ${hwnd}\n`);
+    }
+
     lockWindows.push(win);
   }
 
   if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
     inputWorker.stdin.write("b 1\n");
+    inputWorker.stdin.write("h\n");
   }
 }
 
@@ -851,23 +713,6 @@ function getCPUUsage() {
   });
 }
 
-function withClickThrough(action) {
-  const activeWindows = blackoutWindows.filter(win => win && !win.isDestroyed());
-  for (const win of activeWindows) {
-    win.setIgnoreMouseEvents(true);
-  }
-  
-  action();
-  
-  setTimeout(() => {
-    for (const win of activeWindows) {
-      if (!win.isDestroyed()) {
-        win.setIgnoreMouseEvents(false);
-      }
-    }
-  }, 20);
-}
-
 // ─── SignalR Connection ───────────────────────────────────────────────────────
 async function connectSignalR() {
   if (!deviceId) {
@@ -912,35 +757,27 @@ async function connectSignalR() {
 
   signalRConnection.on('MouseClick', async (x, y, button) => {
     const { rx, ry } = getScaledCoords(x, y);
-    withClickThrough(() => {
-      injectMouseClick(rx, ry, button);
-    });
+    await injectMouseClick(rx, ry, button);
   });
 
   signalRConnection.on('MouseDown', async (x, y, button) => {
     const { rx, ry } = getScaledCoords(x, y);
-    withClickThrough(() => {
-      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write(`d ${rx} ${ry} ${button}\n`);
-      }
-    });
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      inputWorker.stdin.write(`d ${rx} ${ry} ${button}\n`);
+    }
   });
 
   signalRConnection.on('MouseUp', async (x, y, button) => {
     const { rx, ry } = getScaledCoords(x, y);
-    withClickThrough(() => {
-      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write(`u ${rx} ${ry} ${button}\n`);
-      }
-    });
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      inputWorker.stdin.write(`u ${rx} ${ry} ${button}\n`);
+    }
   });
 
   signalRConnection.on('MouseWheel', async (delta) => {
-    withClickThrough(() => {
-      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write(`w ${delta}\n`);
-      }
-    });
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      inputWorker.stdin.write(`w ${delta}\n`);
+    }
   });
 
   signalRConnection.on('KeyEvent', async (key, isDown, ctrl, alt, shift) => {
@@ -952,6 +789,7 @@ async function connectSignalR() {
       createBlackoutWindow(progressInfo);
       if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
         inputWorker.stdin.write("b 1\n");
+        inputWorker.stdin.write("h\n");
       }
     } else {
       destroyBlackoutWindow();
@@ -1173,11 +1011,13 @@ function executeShellCommand(shell, command) {
 
 // ─── Power Commands ───────────────────────────────────────────────────────────
 async function executePowerCommand(command) {
+  const sasScriptPath = path.join(__dirname, 'send_sas.ps1');
   const cmds = {
     restart: process.platform === 'win32' ? 'shutdown /r /t 10' : 'sudo shutdown -r +1',
     shutdown: process.platform === 'win32' ? 'shutdown /s /t 10' : 'sudo shutdown -h +1',
     logoff: process.platform === 'win32' ? 'logoff' : 'pkill -u $(whoami)',
     safemode: 'bcdedit /set {current} safeboot minimal && shutdown /r /t 10',
+    cad: process.platform === 'win32' ? `powershell -NoProfile -ExecutionPolicy Bypass -File "${sasScriptPath}"` : '',
     lock: process.platform === 'win32' ? 'rundll32.exe user32.dll,LockWorkStation' : '',
     taskmgr: process.platform === 'win32' ? 'taskmgr.exe' : ''
   };
@@ -1197,9 +1037,8 @@ async function executePowerCommand(command) {
     if (lockActive) {
       destroyLockWindow();
     } else {
-      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write("cad\n");
-      }
+      const cmd = cmds.cad;
+      if (cmd) exec(cmd);
     }
     return;
   }
@@ -1315,10 +1154,6 @@ ipcMain.handle('get-agent-status', () => {
 ipcMain.handle('get-desktop-stream-id', async () => {
   const sources = await desktopCapturer.getSources({ types: ['screen'] });
   return sources[0]?.id;
-});
-
-ipcMain.handle('is-screen-locked', () => {
-  return isSessionLocked;
 });
 
 // ─── Auto Clipboard Sync ──────────────────────────────────────────────────────

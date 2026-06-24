@@ -45,132 +45,6 @@ function App() {
 
     const peerRef = { current: null };
     const privacyModeRef = { current: false };
-    const videoSenderRef = { current: null };
-    const currentStreamRef = { current: null };
-
-    // Offscreen Canvas setup for lock screen streaming
-    const canvas = document.createElement('canvas');
-    canvas.width = 1920;
-    canvas.height = 1080;
-    const ctx = canvas.getContext('2d');
-    
-    // Draw initial black frame
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    const canvasStream = canvas.captureStream(10); // 10 FPS is plenty
-
-    // Draw lock screen overlay on canvas
-    const drawLockOverlay = () => {
-      const w = canvas.width;
-      const h = canvas.height;
-      // Background gradient
-      const gradient = ctx.createLinearGradient(0, 0, 0, h);
-      gradient.addColorStop(0, '#0f172a');
-      gradient.addColorStop(1, '#1e293b');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, w, h);
-
-      // Grid pattern
-      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-      ctx.lineWidth = 1;
-      for (let x = 0; x < w; x += 60) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-      }
-      for (let y = 0; y < h; y += 60) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-      }
-
-      // Center glow
-      const glow = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, 350);
-      glow.addColorStop(0, 'rgba(79,70,229,0.15)');
-      glow.addColorStop(1, 'rgba(79,70,229,0)');
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, w, h);
-
-      // Lock icon circle
-      ctx.save();
-      ctx.shadowColor = '#6366f1';
-      ctx.shadowBlur = 40;
-      ctx.fillStyle = 'rgba(99,102,241,0.2)';
-      ctx.beginPath();
-      ctx.arc(w/2, h/2 - 80, 80, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      // Lock icon text
-      ctx.font = '72px serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('🔒', w/2, h/2 - 80);
-
-      // Title
-      ctx.fillStyle = '#f1f5f9';
-      ctx.font = 'bold 42px "Segoe UI", sans-serif';
-      ctx.fillText('System Locked', w/2, h/2 + 30);
-
-      // Subtitle
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '24px "Segoe UI", sans-serif';
-      ctx.fillText('The employee\'s workstation is locked', w/2, h/2 + 85);
-
-      // Hint box
-      const boxW = 520, boxH = 60, boxX = w/2 - boxW/2, boxY = h/2 + 130;
-      ctx.fillStyle = 'rgba(99,102,241,0.15)';
-      ctx.strokeStyle = 'rgba(99,102,241,0.5)';
-      ctx.lineWidth = 1.5;
-      const r = 12;
-      ctx.beginPath();
-      ctx.moveTo(boxX + r, boxY);
-      ctx.lineTo(boxX + boxW - r, boxY);
-      ctx.quadraticCurveTo(boxX + boxW, boxY, boxX + boxW, boxY + r);
-      ctx.lineTo(boxX + boxW, boxY + boxH - r);
-      ctx.quadraticCurveTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH);
-      ctx.lineTo(boxX + r, boxY + boxH);
-      ctx.quadraticCurveTo(boxX, boxY + boxH, boxX, boxY + boxH - r);
-      ctx.lineTo(boxX, boxY + r);
-      ctx.quadraticCurveTo(boxX, boxY, boxX + r, boxY);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = '#a5b4fc';
-      ctx.font = '20px "Segoe UI", sans-serif';
-      ctx.fillText('⌨️  Click the CAD button in the toolbar to unlock', w/2, boxY + 31);
-
-      // Timestamp
-      const now = new Date();
-      ctx.fillStyle = '#475569';
-      ctx.font = '16px "Segoe UI", sans-serif';
-      ctx.fillText('Locked at ' + now.toLocaleTimeString(), w/2, h - 60);
-    };
-
-    // Animate the lock overlay (pulsing effect by redrawing periodically)
-    let lockAnimInterval = null;
-    const startLockAnimation = () => {
-      drawLockOverlay();
-      lockAnimInterval = setInterval(drawLockOverlay, 5000); // Redraw every 5s to keep timestamp fresh
-    };
-    const stopLockAnimation = () => {
-      if (lockAnimInterval) { clearInterval(lockAnimInterval); lockAnimInterval = null; }
-    };
-
-    const getNormalDesktopStream = async () => {
-      const sourceId = await window.electronAPI.getDesktopStreamId();
-      return await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: sourceId,
-            minWidth: 1280,
-            maxWidth: 1920,
-            minHeight: 720,
-            maxHeight: 1080
-          }
-        }
-      });
-    };
 
     window.electronAPI.onWebRTCOffer(async ({ engineerConnId, sdp }) => {
       console.log('Received WebRTC offer', engineerConnId);
@@ -192,27 +66,26 @@ function App() {
       };
 
       try {
-        const isLocked = await window.electronAPI.isScreenLocked();
-        let stream;
+        const sourceId = await window.electronAPI.getDesktopStreamId();
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sourceId,
+              minWidth: 1280,
+              maxWidth: 1920,
+              minHeight: 720,
+              maxHeight: 1080
+            }
+          }
+        });
         
-        if (isLocked) {
-          console.log('Initializing WebRTC session in lock screen mode - showing lock overlay');
-          startLockAnimation();
-          stream = canvasStream;
-        } else {
-          stream = await getNormalDesktopStream();
-        }
-        
-        currentStreamRef.current = stream;
-
         stream.getTracks().forEach(track => {
           if (track.kind === 'video') {
             track.enabled = !privacyModeRef.current;
           }
-          const sender = pc.addTrack(track, stream);
-          if (track.kind === 'video') {
-            videoSenderRef.current = sender;
-          }
+          pc.addTrack(track, stream);
         });
 
         await pc.setRemoteDescription({ type: 'offer', sdp });
@@ -246,62 +119,9 @@ function App() {
       }
     });
 
-    // Handle incoming lock screen frame captures from main process
-    const unsubscribeImage = window.electronAPI.onLockScreenImage((base64Data) => {
-      // Stop lock screen overlay animation to avoid overwriting the image
-      stopLockAnimation();
-
-      const img = new Image();
-      img.onload = () => {
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      };
-      img.src = 'data:image/jpeg;base64,' + base64Data;
-    });
-
-    // Handle lock/unlock state transitions dynamically
-    const unsubscribeLockStatus = window.electronAPI.onLockStatusChanged(async (isLocked) => {
-      console.log('Lock status changed to:', isLocked);
-      if (!peerRef.current || !videoSenderRef.current) return;
-
-      try {
-        let newStream;
-        if (isLocked) {
-          console.log('Switching to canvas lock overlay...');
-          startLockAnimation();
-          newStream = canvasStream;
-          // Stop old normal stream tracks to release device capture
-          if (currentStreamRef.current && currentStreamRef.current !== canvasStream) {
-            currentStreamRef.current.getTracks().forEach(t => t.stop());
-          }
-        } else {
-          console.log('Switching back to standard user desktop stream...');
-          stopLockAnimation();
-          // Small delay to ensure DWM session transitions are complete
-          await new Promise(r => setTimeout(r, 1500));
-          newStream = await getNormalDesktopStream();
-        }
-
-        const newTrack = newStream.getVideoTracks()[0];
-        if (newTrack) {
-          newTrack.enabled = !privacyModeRef.current;
-          await videoSenderRef.current.replaceTrack(newTrack);
-          currentStreamRef.current = newStream;
-          console.log('WebRTC track replaced successfully.');
-        }
-      } catch (err) {
-        console.error('Failed to handle lock/unlock stream transition:', err);
-      }
-    });
-
     return () => {
       if (unsubscribe) unsubscribe();
       if (unsubscribePrivacy) unsubscribePrivacy();
-      if (unsubscribeLockStatus) unsubscribeLockStatus();
-      if (unsubscribeImage) unsubscribeImage();
-      stopLockAnimation();
-      if (currentStreamRef.current && currentStreamRef.current !== canvasStream) {
-        currentStreamRef.current.getTracks().forEach(t => t.stop());
-      }
       if (peerRef.current) peerRef.current.close();
     };
   }, []);
