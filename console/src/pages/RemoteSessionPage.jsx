@@ -659,7 +659,6 @@ function RemoteSessionPage() {
       <div className="flex gap-1 mb-3">
         {[
           { id: 'remote', icon: '🖥️', label: 'Remote View' },
-          { id: 'terminal', icon: '💻', label: 'Terminal' },
           { id: 'files', icon: '📁', label: 'File Explorer' },
           { id: 'chat', icon: '💬', label: 'Chat' },
         ].map(tab => (
@@ -722,10 +721,9 @@ function RemoteSessionPage() {
               <div className="toolbar-group" style={{ marginLeft: 'auto' }}>
                 <button
                   className="toolbar-btn danger"
-                  title="Send Ctrl+Alt+Del"
+                  title="Send Ctrl+Alt+Delete"
                   onClick={() => {
                     signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'cad');
-                    toast.info('Sending Ctrl+Alt+Delete command to remote host...');
                   }}
                   style={{ width: 'auto', padding: '0 8px' }}
                 >⌨️ CAD</button>
@@ -815,12 +813,6 @@ function RemoteSessionPage() {
                 </div>
               )}
             </div>
-          </div>
-        )}
-
-        {activeTab === 'terminal' && (
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            <TerminalPanel deviceId={parseInt(deviceId)} sessionId={parseInt(sessionId)} />
           </div>
         )}
 

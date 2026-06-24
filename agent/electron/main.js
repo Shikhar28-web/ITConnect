@@ -3,7 +3,6 @@ const path = require('path');
 const { exec, spawn } = require('child_process');
 const os = require('os');
 const fs = require('fs');
-const net = require('net');
 const { createServer } = require('http');
 const axios = require('axios/dist/node/axios.cjs');
 
@@ -39,11 +38,10 @@ let blackoutWindows = [];
 let lockWindows = [];
 let lockActive = false;
 let privacyModeActive = false;
-let systemWorkerSocket = null;
+let inputWorker = null;
 let signalRConnection = null;
 let deviceId = null;
 let isSessionLocked = false;
-let lockScreenCaptureInterval = null;
 
 // UI Status tracking
 let uiStatus = { connected: false, message: 'Connecting to server...', sessionActive: false, engineerName: '' };
@@ -64,8 +62,14 @@ function updateUiStatus(connected, message, sessionActive = undefined, engineerN
 
 // ─── App Ready ────────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
-  ensureSystemTaskExists();
-  startSystemWorkerConnection();
+  if (process.platform === 'win32') {
+    // Ensure SoftwareSASGeneration policy allows software-initiated Ctrl+Alt+Del
+    exec('reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v SoftwareSASGeneration /t REG_DWORD /d 3 /f', (err) => {
+      if (err) console.warn('SoftwareSASGeneration registry set failed (need admin):', err.message);
+      else console.log('SoftwareSASGeneration registry policy set to 3.');
+    });
+  }
+  startInputWorker();
   createTray();
   createMainWindow();
   if (!tray) {
@@ -80,15 +84,14 @@ app.whenReady().then(async () => {
     powerMonitor.on('lock-screen', () => {
       console.log('System lock detected');
       isSessionLocked = true;
+      // Notify the renderer so it can display lock overlay in admin console
       mainWindow?.webContents.send('lock-status-changed', true);
-      startLockScreenCaptureLoop();
     });
 
     powerMonitor.on('unlock-screen', () => {
       console.log('System unlock detected');
       isSessionLocked = false;
       mainWindow?.webContents.send('lock-status-changed', false);
-      stopLockScreenCaptureLoop();
     });
   }
 });
@@ -99,11 +102,11 @@ app.on('window-all-closed', (e) => {
 
 app.on('quit', () => {
   destroyLockWindow();
-  if (process.platform === 'win32') {
-    exec('schtasks /end /tn "ITComputerAgentSYSTEMWorker"');
-    if (systemWorkerSocket) {
-      try { systemWorkerSocket.destroy(); } catch (e) {}
-    }
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    try {
+      inputWorker.stdin.write("r\n");
+      inputWorker.stdin.end();
+    } catch (e) {}
   }
 });
 
@@ -173,101 +176,121 @@ function createMainWindow() {
   });
 }
 
-// ─── SYSTEM Worker Task & TCP Connection ──────────────────────────────────────
-function ensureSystemTaskExists() {
+// ─── Input Worker (Persistent PowerShell Session) ──────────────────────────────
+function startInputWorker() {
   if (process.platform !== 'win32') return;
 
-  writeRegistry('HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', 'SoftwareSASGeneration', 3, 'REG_DWORD')
-    .then((ok) => {
-      console.log('Registry policy SoftwareSASGeneration set:', ok);
-    });
+  const initScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
 
-  const workerScriptPath = path.join(__dirname, 'system_worker.ps1');
-  const createCmd = `schtasks /create /tn "ITComputerAgentSYSTEMWorker" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \\"${workerScriptPath}\\"" /sc ONCE /sd 01/01/2099 /st 00:00 /ru SYSTEM /rl HIGHEST /f`;
-  
-  exec(createCmd, (err, stdout, stderr) => {
-    if (err) {
-      console.error('Failed to create SYSTEM worker task:', stderr || err.message);
-    } else {
-      console.log('SYSTEM worker task registered/updated successfully.');
-      exec('schtasks /run /tn "ITComputerAgentSYSTEMWorker"', (runErr) => {
-        if (runErr) {
-          console.error('Failed to run SYSTEM worker task:', runErr.message);
-        } else {
-          console.log('SYSTEM worker task launched.');
-        }
-      });
+public class Win32Input {
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, uint dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, uint dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern bool BlockInput(bool fBlockIt);
+
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    public const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+    public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+    public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
+    public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
+    public const uint MOUSEEVENTF_WHEEL = 0x0800;
+
+    public static void Move(int x, int y) { SetCursorPos(x, y); }
+
+    public static void Click(int x, int y, int button) {
+        SetCursorPos(x, y);
+        uint down = MOUSEEVENTF_LEFTDOWN, up = MOUSEEVENTF_LEFTUP;
+        if (button == 2) { down = MOUSEEVENTF_RIGHTDOWN; up = MOUSEEVENTF_RIGHTUP; }
+        else if (button == 1) { down = MOUSEEVENTF_MIDDLEDOWN; up = MOUSEEVENTF_MIDDLEUP; }
+        mouse_event(down, 0, 0, 0, 0);
+        System.Threading.Thread.Sleep(15);
+        mouse_event(up, 0, 0, 0, 0);
     }
-  });
+
+    public static void MouseDown(int x, int y, int button) {
+        SetCursorPos(x, y);
+        uint flag = MOUSEEVENTF_LEFTDOWN;
+        if (button == 2) flag = MOUSEEVENTF_RIGHTDOWN;
+        else if (button == 1) flag = MOUSEEVENTF_MIDDLEDOWN;
+        mouse_event(flag, 0, 0, 0, 0);
+    }
+
+    public static void MouseUp(int x, int y, int button) {
+        SetCursorPos(x, y);
+        uint flag = MOUSEEVENTF_LEFTUP;
+        if (button == 2) flag = MOUSEEVENTF_RIGHTUP;
+        else if (button == 1) flag = MOUSEEVENTF_MIDDLEUP;
+        mouse_event(flag, 0, 0, 0, 0);
+    }
+
+    public static void MouseWheel(int delta) {
+        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)delta, 0);
+    }
+
+    [DllImport("user32.dll")]
+    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
+    public const uint SPI_SETCURSORS = 0x0057;
+
+    public static void RestoreGlobalCursor() {
+        SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+    }
 }
+"@
+Add-Type -AssemblyName System.Windows.Forms
 
-function startSystemWorkerConnection() {
-  if (process.platform !== 'win32') return;
-
-  const connect = () => {
-    console.log('Attempting to connect to SYSTEM worker TCP socket...');
-    const socket = new net.Socket();
-    
-    socket.connect(49152, '127.0.0.1', () => {
-      console.log('Connected to SYSTEM worker TCP socket!');
-      systemWorkerSocket = socket;
-    });
-
-    socket.on('error', (err) => {
-      systemWorkerSocket = null;
-    });
-
-    socket.on('close', () => {
-      systemWorkerSocket = null;
-      console.log('SYSTEM worker socket closed, retrying in 2 seconds...');
-      setTimeout(connect, 2000);
-    });
-  };
-
-  connect();
-}
-
-function sendToSystemWorker(command) {
-  if (process.platform === 'win32' && systemWorkerSocket) {
+while ($line = [Console]::ReadLine()) {
     try {
-      systemWorkerSocket.write(command + '\n');
-    } catch (err) {
-      console.warn('Failed to write to SYSTEM worker socket:', err.message);
+        $line = $line.Replace("\`r", "")
+        $parts = $line.Split(' ')
+        if ($parts[0] -eq 'm') {
+            [Win32Input]::Move([int]$parts[1], [int]$parts[2])
+        } elseif ($parts[0] -eq 'c') {
+            [Win32Input]::Click([int]$parts[1], [int]$parts[2], [int]$parts[3])
+        } elseif ($parts[0] -eq 'd') {
+            [Win32Input]::MouseDown([int]$parts[1], [int]$parts[2], [int]$parts[3])
+        } elseif ($parts[0] -eq 'u') {
+            [Win32Input]::MouseUp([int]$parts[1], [int]$parts[2], [int]$parts[3])
+        } elseif ($parts[0] -eq 'w') {
+            [Win32Input]::MouseWheel([int]$parts[1])
+        } elseif ($parts[0] -eq 'b') {
+            [Win32Input]::BlockInput([int]$parts[1] -eq 1)
+        } elseif ($parts[0] -eq 'r') {
+            [Win32Input]::RestoreGlobalCursor()
+        } elseif ($parts[0] -eq 'k') {
+            $keyStr = $line.Substring(2)
+            [System.Windows.Forms.SendKeys]::SendWait($keyStr)
+        }
+    } catch {
+        # ignore error
     }
-  }
 }
+[Win32Input]::RestoreGlobalCursor()
+`;
 
-function startLockScreenCaptureLoop() {
-  if (lockScreenCaptureInterval) return;
-  
-  const screenshotFile = 'C:\\Users\\Public\\ITComputer\\lockscreen.jpg';
-  try { if (fs.existsSync(screenshotFile)) fs.unlinkSync(screenshotFile); } catch (e) {}
+  inputWorker = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', '-']);
+  inputWorker.stdin.write(initScript + '\n');
 
-  lockScreenCaptureInterval = setInterval(() => {
-    if (!isSessionLocked) {
-      stopLockScreenCaptureLoop();
-      return;
-    }
-    
-    sendToSystemWorker(`capture ${screenshotFile}`);
-    
-    setTimeout(() => {
-      if (fs.existsSync(screenshotFile)) {
-        try {
-          const data = fs.readFileSync(screenshotFile);
-          const base64 = data.toString('base64');
-          mainWindow?.webContents.send('lock-screen-image', base64);
-        } catch (err) {}
-      }
-    }, 400);
-  }, 1000);
-}
+  inputWorker.on('error', (err) => {
+    console.error('Input worker error:', err);
+  });
 
-function stopLockScreenCaptureLoop() {
-  if (lockScreenCaptureInterval) {
-    clearInterval(lockScreenCaptureInterval);
-    lockScreenCaptureInterval = null;
-  }
+  inputWorker.on('exit', () => {
+    console.warn('Input worker exited unexpectedly, restarting...');
+    inputWorker = null;
+    setTimeout(startInputWorker, 2000);
+  });
 }
 
 // ─── Blackout Overlay Window ──────────────────────────────────────────────────
@@ -349,10 +372,6 @@ function createBlackoutWindow(progressInfo) {
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
     win.show();
 
-    if (process.platform === 'win32') {
-      win.setContentProtection(true);
-    }
-
     blackoutWindows.push(win);
   }
 }
@@ -365,8 +384,9 @@ function destroyBlackoutWindow() {
   }
   blackoutWindows = [];
 
-  if (process.platform === 'win32') {
-    sendToSystemWorker("b 0");
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write("b 0\n");
+    inputWorker.stdin.write("r\n");
   }
 }
 
@@ -521,17 +541,11 @@ function createLockWindow() {
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(lockHtml)}`);
     win.show();
 
-    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-      const hwnd = getHwndString(win);
-      inputWorker.stdin.write(`e ${hwnd}\n`);
-    }
-
     lockWindows.push(win);
   }
 
   if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
     inputWorker.stdin.write("b 1\n");
-    inputWorker.stdin.write("h\n");
   }
 }
 
@@ -546,8 +560,9 @@ function destroyLockWindow() {
   lockActive = false;
   isClosingProgrammatically = false;
 
-  if (process.platform === 'win32') {
-    sendToSystemWorker("b 0");
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write("b 0\n");
+    inputWorker.stdin.write("r\n");
   }
 }
 
@@ -702,16 +717,22 @@ async function connectSignalR() {
 
   signalRConnection.on('MouseDown', async (x, y, button) => {
     const { rx, ry } = getScaledCoords(x, y);
-    sendToSystemWorker(`d ${rx} ${ry} ${button}`);
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      inputWorker.stdin.write(`d ${rx} ${ry} ${button}\n`);
+    }
   });
 
   signalRConnection.on('MouseUp', async (x, y, button) => {
     const { rx, ry } = getScaledCoords(x, y);
-    sendToSystemWorker(`u ${rx} ${ry} ${button}`);
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      inputWorker.stdin.write(`u ${rx} ${ry} ${button}\n`);
+    }
   });
 
   signalRConnection.on('MouseWheel', async (delta) => {
-    sendToSystemWorker(`w ${delta}`);
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      inputWorker.stdin.write(`w ${delta}\n`);
+    }
   });
 
   signalRConnection.on('KeyEvent', async (key, isDown, ctrl, alt, shift) => {
@@ -721,10 +742,15 @@ async function connectSignalR() {
   signalRConnection.on('SetBlackout', (enabled, progressInfo) => {
     if (enabled) {
       createBlackoutWindow(progressInfo);
-      sendToSystemWorker("b 1");
+      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+        inputWorker.stdin.write("b 1\n");
+      }
     } else {
       destroyBlackoutWindow();
-      sendToSystemWorker("b 0");
+      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+        inputWorker.stdin.write("b 0\n");
+        inputWorker.stdin.write("r\n");
+      }
     }
   });
 
@@ -886,12 +912,16 @@ function mapKeyToSendKeys(key) {
 // ─── Mouse/Keyboard Injection ─────────────────────────────────────────────────
 async function injectMouseMove(x, y) {
   if (privacyModeActive) return;
-  sendToSystemWorker(`m ${x} ${y}`);
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write(`m ${x} ${y}\n`);
+  }
 }
 
 async function injectMouseClick(x, y, button) {
   if (privacyModeActive) return;
-  sendToSystemWorker(`c ${x} ${y} ${button}`);
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write(`c ${x} ${y} ${button}\n`);
+  }
 }
 
 async function injectKeyEvent(key, isDown, ctrl, alt, shift) {
@@ -913,7 +943,9 @@ async function injectKeyEvent(key, isDown, ctrl, alt, shift) {
     combo += mapped;
   }
 
-  sendToSystemWorker(`k ${combo}`);
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write(`k ${combo}\n`);
+  }
 }
 
 // ─── Shell Command Execution ──────────────────────────────────────────────────
@@ -957,7 +989,12 @@ async function executePowerCommand(command) {
     if (lockActive) {
       destroyLockWindow();
     } else {
-      sendToSystemWorker('cad');
+      // Use the send_sas.ps1 script to send Ctrl+Alt+Del (requires SoftwareSASGeneration = 3 in registry)
+      const sasScriptPath = path.join(__dirname, 'send_sas.ps1');
+      exec(`powershell -NoProfile -ExecutionPolicy Bypass -File "${sasScriptPath}"`, (err) => {
+        if (err) console.warn('SendSAS failed:', err.message);
+        else console.log('SendSAS executed successfully.');
+      });
     }
     return;
   }
