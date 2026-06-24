@@ -413,47 +413,72 @@ function createBlackoutWindow(progressInfo) {
     <!DOCTYPE html>
     <html>
     <head>
+      <meta charset="UTF-8">
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; cursor: none !important; }
         body {
           background: #000;
           color: #fff;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
+          overflow: hidden;
           height: 100vh;
-          font-family: 'Segoe UI', sans-serif;
-          user-select: none;
+          width: 100vw;
+          position: relative;
           cursor: none !important;
         }
-        .logo { font-size: 48px; margin-bottom: 24px; }
-        .company { font-size: 28px; font-weight: 700; color: #4A9EFF; margin-bottom: 40px; }
-        .title { font-size: 22px; font-weight: 600; margin-bottom: 16px; }
-        .message { font-size: 16px; color: #aaa; text-align: center; max-width: 500px; line-height: 1.6; margin-bottom: 32px; }
-        .progress-bar {
-          width: 400px;
-          height: 8px;
-          background: #333;
-          border-radius: 4px;
-          overflow: hidden;
-          margin-bottom: 12px;
+        #screensaver {
+          position: absolute;
+          font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+          font-size: 32px;
+          font-weight: 300;
+          color: #555555;
+          white-space: nowrap;
+          user-select: none;
+          text-shadow: 0 0 8px rgba(255,255,255,0.15);
         }
-        .progress-fill {
-          height: 100%;
-          background: linear-gradient(90deg, #4A9EFF, #7B61FF);
-          border-radius: 4px;
-          animation: progress 3s ease-in-out infinite alternate;
-        }
-        @keyframes progress {
-          from { width: 20%; }
-          to { width: 90%; }
-        }
-        .info { font-size: 13px; color: #666; }
-        .ticket { margin-top: 20px; font-size: 14px; color: #4A9EFF; }
       </style>
     </head>
-   
+    <body>
+      <div id="screensaver">Windows</div>
+      <script>
+        const el = document.getElementById('screensaver');
+        let w = window.innerWidth;
+        let h = window.innerHeight;
+        let x = Math.random() * (w - 200);
+        let y = Math.random() * (h - 50);
+        let dx = 1.5;
+        let dy = 1.5;
+        
+        function update() {
+          w = window.innerWidth;
+          h = window.innerHeight;
+          const rect = el.getBoundingClientRect();
+          
+          if (x + rect.width >= w || x <= 0) {
+            dx = -dx;
+          }
+          if (y + rect.height >= h || y <= 0) {
+            dy = -dy;
+          }
+          
+          x += dx;
+          y += dy;
+          
+          el.style.left = x + 'px';
+          el.style.top = y + 'px';
+          
+          requestAnimationFrame(update);
+        }
+        
+        window.addEventListener('resize', () => {
+          w = window.innerWidth;
+          h = window.innerHeight;
+          x = Math.min(x, w - el.offsetWidth);
+          y = Math.min(y, h - el.offsetHeight);
+        });
+        
+        requestAnimationFrame(update);
+      </script>
+    </body>
     </html>
   `;
 
@@ -464,7 +489,7 @@ function createBlackoutWindow(progressInfo) {
       y: d.bounds.y,
       width: d.bounds.width,
       height: d.bounds.height,
-      fullscreen: false,
+      fullscreen: true,
       alwaysOnTop: true,
       frame: false,
       skipTaskbar: true,
@@ -478,7 +503,7 @@ function createBlackoutWindow(progressInfo) {
       }
     });
 
-    win.setIgnoreMouseEvents(true);
+    win.setIgnoreMouseEvents(true, { forward: true });
     win.setAlwaysOnTop(true, 'screen-saver');
     
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
