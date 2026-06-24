@@ -45,6 +45,37 @@ function App() {
 
     const peerRef = { current: null };
     const privacyModeRef = { current: false };
+    const videoSenderRef = { current: null };
+    const currentStreamRef = { current: null };
+
+    // Offscreen Canvas setup for lock screen streaming
+    const canvas = document.createElement('canvas');
+    canvas.width = 1920;
+    canvas.height = 1080;
+    const ctx = canvas.getContext('2d');
+    
+    // Draw initial black frame
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    const canvasStream = canvas.captureStream(10); // 10 FPS is plenty
+
+    const getNormalDesktopStream = async () => {
+      const sourceId = await window.electronAPI.getDesktopStreamId();
+      return await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: sourceId,
+            minWidth: 1280,
+            maxWidth: 1920,
+            minHeight: 720,
+            maxHeight: 1080
+          }
+        }
+      });
+    };
 
     window.electronAPI.onWebRTCOffer(async ({ engineerConnId, sdp }) => {
       console.log('Received WebRTC offer', engineerConnId);
@@ -66,26 +97,26 @@ function App() {
       };
 
       try {
-        const sourceId = await window.electronAPI.getDesktopStreamId();
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            mandatory: {
-              chromeMediaSource: 'desktop',
-              chromeMediaSourceId: sourceId,
-              minWidth: 1280,
-              maxWidth: 1920,
-              minHeight: 720,
-              maxHeight: 1080
-            }
-          }
-        });
+        const isLocked = await window.electronAPI.isScreenLocked();
+        let stream;
         
+        if (isLocked) {
+          console.log('Initializing WebRTC session in lock screen mode');
+          stream = canvasStream;
+        } else {
+          stream = await getNormalDesktopStream();
+        }
+        
+        currentStreamRef.current = stream;
+
         stream.getTracks().forEach(track => {
           if (track.kind === 'video') {
             track.enabled = !privacyModeRef.current;
           }
-          pc.addTrack(track, stream);
+          const sender = pc.addTrack(track, stream);
+          if (track.kind === 'video') {
+            videoSenderRef.current = sender;
+          }
         });
 
         await pc.setRemoteDescription({ type: 'offer', sdp });
@@ -119,9 +150,60 @@ function App() {
       }
     });
 
+    // Handle incoming lock screen frame captures
+    const unsubscribeImage = window.electronAPI.onLockScreenImage((base64Data) => {
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      };
+      img.src = 'data:image/jpeg;base64,' + base64Data;
+    });
+
+    // Handle lock/unlock state transitions dynamically
+    const unsubscribeLockStatus = window.electronAPI.onLockStatusChanged(async (isLocked) => {
+      console.log('Lock status changed to:', isLocked);
+      if (!peerRef.current || !videoSenderRef.current) return;
+
+      try {
+        let newStream;
+        if (isLocked) {
+          console.log('Switching to canvas stream for lock screen...');
+          // Draw a blank frame to clear previous content
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          newStream = canvasStream;
+        } else {
+          console.log('Switching back to standard user desktop stream...');
+          // Small delay to ensure DWM session transitions are complete
+          await new Promise(r => setTimeout(r, 1000));
+          newStream = await getNormalDesktopStream();
+        }
+
+        const newTrack = newStream.getVideoTracks()[0];
+        if (newTrack) {
+          newTrack.enabled = !privacyModeRef.current;
+          await videoSenderRef.current.replaceTrack(newTrack);
+          
+          // Stop old normal stream tracks to release device capture if switching to canvas
+          if (isLocked && currentStreamRef.current && currentStreamRef.current !== canvasStream) {
+            currentStreamRef.current.getTracks().forEach(t => t.stop());
+          }
+          currentStreamRef.current = newStream;
+          console.log('WebRTC track replaced successfully.');
+        }
+      } catch (err) {
+        console.error('Failed to handle lock/unlock stream transition:', err);
+      }
+    });
+
     return () => {
       if (unsubscribe) unsubscribe();
       if (unsubscribePrivacy) unsubscribePrivacy();
+      if (unsubscribeImage) unsubscribeImage();
+      if (unsubscribeLockStatus) unsubscribeLockStatus();
+      if (currentStreamRef.current && currentStreamRef.current !== canvasStream) {
+        currentStreamRef.current.getTracks().forEach(t => t.stop());
+      }
       if (peerRef.current) peerRef.current.close();
     };
   }, []);

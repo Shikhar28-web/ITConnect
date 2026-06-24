@@ -1,8 +1,9 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, screen, desktopCapturer } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, desktopCapturer, powerMonitor } = require('electron');
 const path = require('path');
 const { exec, spawn } = require('child_process');
 const os = require('os');
 const fs = require('fs');
+const net = require('net');
 const { createServer } = require('http');
 const axios = require('axios/dist/node/axios.cjs');
 
@@ -38,9 +39,11 @@ let blackoutWindows = [];
 let lockWindows = [];
 let lockActive = false;
 let privacyModeActive = false;
-let inputWorker = null;
+let systemWorkerSocket = null;
 let signalRConnection = null;
 let deviceId = null;
+let isSessionLocked = false;
+let lockScreenCaptureInterval = null;
 
 // UI Status tracking
 let uiStatus = { connected: false, message: 'Connecting to server...', sessionActive: false, engineerName: '' };
@@ -61,7 +64,8 @@ function updateUiStatus(connected, message, sessionActive = undefined, engineerN
 
 // ─── App Ready ────────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
-  startInputWorker();
+  ensureSystemTaskExists();
+  startSystemWorkerConnection();
   createTray();
   createMainWindow();
   if (!tray) {
@@ -71,6 +75,22 @@ app.whenReady().then(async () => {
   await registerDevice();
   await connectSignalR();
   startClipboardMonitor();
+
+  if (process.platform === 'win32') {
+    powerMonitor.on('lock-screen', () => {
+      console.log('System lock detected');
+      isSessionLocked = true;
+      mainWindow?.webContents.send('lock-status-changed', true);
+      startLockScreenCaptureLoop();
+    });
+
+    powerMonitor.on('unlock-screen', () => {
+      console.log('System unlock detected');
+      isSessionLocked = false;
+      mainWindow?.webContents.send('lock-status-changed', false);
+      stopLockScreenCaptureLoop();
+    });
+  }
 });
 
 app.on('window-all-closed', (e) => {
@@ -79,11 +99,11 @@ app.on('window-all-closed', (e) => {
 
 app.on('quit', () => {
   destroyLockWindow();
-  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-    try {
-      inputWorker.stdin.write("r\n");
-      inputWorker.stdin.end();
-    } catch (e) {}
+  if (process.platform === 'win32') {
+    exec('schtasks /end /tn "ITComputerAgentSYSTEMWorker"');
+    if (systemWorkerSocket) {
+      try { systemWorkerSocket.destroy(); } catch (e) {}
+    }
   }
 });
 
@@ -153,178 +173,101 @@ function createMainWindow() {
   });
 }
 
-// ─── Input Worker (Persistent PowerShell Session) ──────────────────────────────
-function startInputWorker() {
+// ─── SYSTEM Worker Task & TCP Connection ──────────────────────────────────────
+function ensureSystemTaskExists() {
   if (process.platform !== 'win32') return;
 
-  const initScript = `
-Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
+  writeRegistry('HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', 'SoftwareSASGeneration', 3, 'REG_DWORD')
+    .then((ok) => {
+      console.log('Registry policy SoftwareSASGeneration set:', ok);
+    });
 
-public class Win32Input {
-    [DllImport("user32.dll")]
-    public static extern bool SetCursorPos(int x, int y);
-
-    [DllImport("user32.dll")]
-    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, uint dwExtraInfo);
-
-    [DllImport("user32.dll")]
-    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, uint dwExtraInfo);
-
-    [DllImport("user32.dll")]
-    public static extern bool BlockInput(bool fBlockIt);
-
-    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
-    public const uint MOUSEEVENTF_LEFTUP = 0x0004;
-    public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
-    public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
-    public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
-    public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
-    public const uint MOUSEEVENTF_WHEEL = 0x0800;
-
-    public static void Move(int x, int y) {
-        SetCursorPos(x, y);
-    }
-
-    public static void Click(int x, int y, int button) {
-        SetCursorPos(x, y);
-        uint down = MOUSEEVENTF_LEFTDOWN;
-        uint up = MOUSEEVENTF_LEFTUP;
-        if (button == 2) {
-            down = MOUSEEVENTF_RIGHTDOWN;
-            up = MOUSEEVENTF_RIGHTUP;
-        } else if (button == 1) {
-            down = MOUSEEVENTF_MIDDLEDOWN;
-            up = MOUSEEVENTF_MIDDLEUP;
+  const workerScriptPath = path.join(__dirname, 'system_worker.ps1');
+  const createCmd = `schtasks /create /tn "ITComputerAgentSYSTEMWorker" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \\"${workerScriptPath}\\"" /sc ONCE /sd 01/01/2099 /st 00:00 /ru SYSTEM /rl HIGHEST /f`;
+  
+  exec(createCmd, (err, stdout, stderr) => {
+    if (err) {
+      console.error('Failed to create SYSTEM worker task:', stderr || err.message);
+    } else {
+      console.log('SYSTEM worker task registered/updated successfully.');
+      exec('schtasks /run /tn "ITComputerAgentSYSTEMWorker"', (runErr) => {
+        if (runErr) {
+          console.error('Failed to run SYSTEM worker task:', runErr.message);
+        } else {
+          console.log('SYSTEM worker task launched.');
         }
-        mouse_event(down, 0, 0, 0, 0);
-        System.Threading.Thread.Sleep(15);
-        mouse_event(up, 0, 0, 0, 0);
+      });
     }
-
-    public static void MouseDown(int x, int y, int button) {
-        SetCursorPos(x, y);
-        uint flag = MOUSEEVENTF_LEFTDOWN;
-        if (button == 2) flag = MOUSEEVENTF_RIGHTDOWN;
-        else if (button == 1) flag = MOUSEEVENTF_MIDDLEDOWN;
-        mouse_event(flag, 0, 0, 0, 0);
-    }
-
-    public static void MouseUp(int x, int y, int button) {
-        SetCursorPos(x, y);
-        uint flag = MOUSEEVENTF_LEFTUP;
-        if (button == 2) flag = MOUSEEVENTF_RIGHTUP;
-        else if (button == 1) flag = MOUSEEVENTF_MIDDLEUP;
-        mouse_event(flag, 0, 0, 0, 0);
-    }
-
-    public static void MouseWheel(int delta) {
-        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)delta, 0);
-    }
-
-    [DllImport("user32.dll")]
-    public static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
-
-    [DllImport("user32.dll")]
-    public static extern bool SetSystemCursor(IntPtr hcur, uint id);
-
-    [DllImport("user32.dll")]
-    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
-
-    [DllImport("user32.dll")]
-    public static extern int GetSystemMetrics(int nIndex);
-
-    [DllImport("user32.dll")]
-    public static extern uint SetWindowDisplayAffinity(IntPtr hwnd, uint dwAffinity);
-
-    public const uint SPI_SETCURSORS = 0x0057;
-    public const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
-
-    public static readonly uint[] CursorIds = { 32512, 32513, 32514, 32515, 32516, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650, 32651 };
-
-    public static void HideGlobalCursor() {
-        int cx = GetSystemMetrics(13); // SM_CXCURSOR
-        int cy = GetSystemMetrics(14); // SM_CYCURSOR
-        if (cx <= 0) cx = 32;
-        if (cy <= 0) cy = 32;
-
-        int widthInBytes = ((cx + 15) / 16) * 2;
-        int numBytes = widthInBytes * cy;
-
-        byte[] andPlane = new byte[numBytes];
-        for (int i = 0; i < numBytes; i++) andPlane[i] = 0xFF;
-        byte[] xorPlane = new byte[numBytes];
-        for (int i = 0; i < numBytes; i++) xorPlane[i] = 0x00;
-        
-        foreach (uint id in CursorIds) {
-            IntPtr blank = CreateCursor(IntPtr.Zero, 0, 0, cx, cy, andPlane, xorPlane);
-            if (blank != IntPtr.Zero) {
-                SetSystemCursor(blank, id);
-            }
-        }
-    }
-
-    public static void RestoreGlobalCursor() {
-        SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
-    }
-
-    public static void ExcludeFromCapture(IntPtr hwnd) {
-        SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
-    }
-}
-"@
-Add-Type -AssemblyName System.Windows.Forms
-
-while ($line = [Console]::ReadLine()) {
-    try {
-        $line = $line.Replace("\`r", "")
-        $parts = $line.Split(' ')
-        if ($parts[0] -eq 'm') {
-            [Win32Input]::Move([int]$parts[1], [int]$parts[2])
-        } elseif ($parts[0] -eq 'c') {
-            [Win32Input]::Click([int]$parts[1], [int]$parts[2], [int]$parts[3])
-        } elseif ($parts[0] -eq 'd') {
-            [Win32Input]::MouseDown([int]$parts[1], [int]$parts[2], [int]$parts[3])
-        } elseif ($parts[0] -eq 'u') {
-            [Win32Input]::MouseUp([int]$parts[1], [int]$parts[2], [int]$parts[3])
-        } elseif ($parts[0] -eq 'w') {
-            [Win32Input]::MouseWheel([int]$parts[1])
-        } elseif ($parts[0] -eq 'b') {
-            [Win32Input]::BlockInput([int]$parts[1] -eq 1)
-        } elseif ($parts[0] -eq 'h') {
-            [Win32Input]::HideGlobalCursor()
-        } elseif ($parts[0] -eq 'r') {
-            [Win32Input]::RestoreGlobalCursor()
-        } elseif ($parts[0] -eq 'k') {
-            $keyStr = $line.Substring(2)
-            [System.Windows.Forms.SendKeys]::SendWait($keyStr)
-        } elseif ($parts[0] -eq 'e') {
-            $hwnd = [IntPtr][long]$parts[1]
-            [Win32Input]::ExcludeFromCapture($hwnd)
-        }
-    } catch {
-        # ignore error
-    }
-}
-[Win32Input]::RestoreGlobalCursor()
-`;
-
-  inputWorker = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', '-']);
-  inputWorker.stdin.write(initScript + '\n');
-
-  inputWorker.on('error', (err) => {
-    console.error('Input worker error:', err);
   });
 }
 
-// Helper to get HWND as a safe string (handles 64-bit and 32-bit platforms)
-function getHwndString(win) {
-  const buf = win.getNativeWindowHandle();
-  if (buf.length === 8) {
-    return buf.readBigInt64LE(0).toString();
+function startSystemWorkerConnection() {
+  if (process.platform !== 'win32') return;
+
+  const connect = () => {
+    console.log('Attempting to connect to SYSTEM worker TCP socket...');
+    const socket = new net.Socket();
+    
+    socket.connect(49152, '127.0.0.1', () => {
+      console.log('Connected to SYSTEM worker TCP socket!');
+      systemWorkerSocket = socket;
+    });
+
+    socket.on('error', (err) => {
+      systemWorkerSocket = null;
+    });
+
+    socket.on('close', () => {
+      systemWorkerSocket = null;
+      console.log('SYSTEM worker socket closed, retrying in 2 seconds...');
+      setTimeout(connect, 2000);
+    });
+  };
+
+  connect();
+}
+
+function sendToSystemWorker(command) {
+  if (process.platform === 'win32' && systemWorkerSocket) {
+    try {
+      systemWorkerSocket.write(command + '\n');
+    } catch (err) {
+      console.warn('Failed to write to SYSTEM worker socket:', err.message);
+    }
   }
-  return buf.readInt32LE(0).toString();
+}
+
+function startLockScreenCaptureLoop() {
+  if (lockScreenCaptureInterval) return;
+  
+  const screenshotFile = 'C:\\Users\\Public\\ITComputer\\lockscreen.jpg';
+  try { if (fs.existsSync(screenshotFile)) fs.unlinkSync(screenshotFile); } catch (e) {}
+
+  lockScreenCaptureInterval = setInterval(() => {
+    if (!isSessionLocked) {
+      stopLockScreenCaptureLoop();
+      return;
+    }
+    
+    sendToSystemWorker(`capture ${screenshotFile}`);
+    
+    setTimeout(() => {
+      if (fs.existsSync(screenshotFile)) {
+        try {
+          const data = fs.readFileSync(screenshotFile);
+          const base64 = data.toString('base64');
+          mainWindow?.webContents.send('lock-screen-image', base64);
+        } catch (err) {}
+      }
+    }, 400);
+  }, 1000);
+}
+
+function stopLockScreenCaptureLoop() {
+  if (lockScreenCaptureInterval) {
+    clearInterval(lockScreenCaptureInterval);
+    lockScreenCaptureInterval = null;
+  }
 }
 
 // ─── Blackout Overlay Window ──────────────────────────────────────────────────
@@ -406,9 +349,8 @@ function createBlackoutWindow(progressInfo) {
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
     win.show();
 
-    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-      const hwnd = getHwndString(win);
-      inputWorker.stdin.write(`e ${hwnd}\n`);
+    if (process.platform === 'win32') {
+      win.setContentProtection(true);
     }
 
     blackoutWindows.push(win);
@@ -423,9 +365,8 @@ function destroyBlackoutWindow() {
   }
   blackoutWindows = [];
 
-  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-    inputWorker.stdin.write("b 0\n");
-    inputWorker.stdin.write("r\n");
+  if (process.platform === 'win32') {
+    sendToSystemWorker("b 0");
   }
 }
 
@@ -605,9 +546,8 @@ function destroyLockWindow() {
   lockActive = false;
   isClosingProgrammatically = false;
 
-  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-    inputWorker.stdin.write("b 0\n");
-    inputWorker.stdin.write("r\n");
+  if (process.platform === 'win32') {
+    sendToSystemWorker("b 0");
   }
 }
 
@@ -762,22 +702,16 @@ async function connectSignalR() {
 
   signalRConnection.on('MouseDown', async (x, y, button) => {
     const { rx, ry } = getScaledCoords(x, y);
-    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-      inputWorker.stdin.write(`d ${rx} ${ry} ${button}\n`);
-    }
+    sendToSystemWorker(`d ${rx} ${ry} ${button}`);
   });
 
   signalRConnection.on('MouseUp', async (x, y, button) => {
     const { rx, ry } = getScaledCoords(x, y);
-    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-      inputWorker.stdin.write(`u ${rx} ${ry} ${button}\n`);
-    }
+    sendToSystemWorker(`u ${rx} ${ry} ${button}`);
   });
 
   signalRConnection.on('MouseWheel', async (delta) => {
-    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-      inputWorker.stdin.write(`w ${delta}\n`);
-    }
+    sendToSystemWorker(`w ${delta}`);
   });
 
   signalRConnection.on('KeyEvent', async (key, isDown, ctrl, alt, shift) => {
@@ -787,16 +721,10 @@ async function connectSignalR() {
   signalRConnection.on('SetBlackout', (enabled, progressInfo) => {
     if (enabled) {
       createBlackoutWindow(progressInfo);
-      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write("b 1\n");
-        inputWorker.stdin.write("h\n");
-      }
+      sendToSystemWorker("b 1");
     } else {
       destroyBlackoutWindow();
-      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write("b 0\n");
-        inputWorker.stdin.write("r\n");
-      }
+      sendToSystemWorker("b 0");
     }
   });
 
@@ -958,16 +886,12 @@ function mapKeyToSendKeys(key) {
 // ─── Mouse/Keyboard Injection ─────────────────────────────────────────────────
 async function injectMouseMove(x, y) {
   if (privacyModeActive) return;
-  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-    inputWorker.stdin.write(`m ${x} ${y}\n`);
-  }
+  sendToSystemWorker(`m ${x} ${y}`);
 }
 
 async function injectMouseClick(x, y, button) {
   if (privacyModeActive) return;
-  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-    inputWorker.stdin.write(`c ${x} ${y} ${button}\n`);
-  }
+  sendToSystemWorker(`c ${x} ${y} ${button}`);
 }
 
 async function injectKeyEvent(key, isDown, ctrl, alt, shift) {
@@ -989,9 +913,7 @@ async function injectKeyEvent(key, isDown, ctrl, alt, shift) {
     combo += mapped;
   }
 
-  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-    inputWorker.stdin.write(`k ${combo}\n`);
-  }
+  sendToSystemWorker(`k ${combo}`);
 }
 
 // ─── Shell Command Execution ──────────────────────────────────────────────────
@@ -1011,13 +933,11 @@ function executeShellCommand(shell, command) {
 
 // ─── Power Commands ───────────────────────────────────────────────────────────
 async function executePowerCommand(command) {
-  const sasScriptPath = path.join(__dirname, 'send_sas.ps1');
   const cmds = {
     restart: process.platform === 'win32' ? 'shutdown /r /t 10' : 'sudo shutdown -r +1',
     shutdown: process.platform === 'win32' ? 'shutdown /s /t 10' : 'sudo shutdown -h +1',
     logoff: process.platform === 'win32' ? 'logoff' : 'pkill -u $(whoami)',
     safemode: 'bcdedit /set {current} safeboot minimal && shutdown /r /t 10',
-    cad: process.platform === 'win32' ? `powershell -NoProfile -ExecutionPolicy Bypass -File "${sasScriptPath}"` : '',
     lock: process.platform === 'win32' ? 'rundll32.exe user32.dll,LockWorkStation' : '',
     taskmgr: process.platform === 'win32' ? 'taskmgr.exe' : ''
   };
@@ -1037,8 +957,7 @@ async function executePowerCommand(command) {
     if (lockActive) {
       destroyLockWindow();
     } else {
-      const cmd = cmds.cad;
-      if (cmd) exec(cmd);
+      sendToSystemWorker('cad');
     }
     return;
   }
@@ -1154,6 +1073,10 @@ ipcMain.handle('get-agent-status', () => {
 ipcMain.handle('get-desktop-stream-id', async () => {
   const sources = await desktopCapturer.getSources({ types: ['screen'] });
   return sources[0]?.id;
+});
+
+ipcMain.handle('is-screen-locked', () => {
+  return isSessionLocked;
 });
 
 // ─── Auto Clipboard Sync ──────────────────────────────────────────────────────

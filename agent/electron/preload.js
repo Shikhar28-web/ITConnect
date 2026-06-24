@@ -26,6 +26,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Remove listeners
-  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)
+  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
+
+  // Lock Screen Handling
+  onLockStatusChanged: (callback) => {
+    const subscription = (_, locked) => callback(locked);
+    ipcRenderer.on('lock-status-changed', subscription);
+    return () => ipcRenderer.removeListener('lock-status-changed', subscription);
+  },
+  onLockScreenImage: (callback) => {
+    const subscription = (_, base64Data) => callback(base64Data);
+    ipcRenderer.on('lock-screen-image', subscription);
+    return () => ipcRenderer.removeListener('lock-screen-image', subscription);
+  },
+  isScreenLocked: () => ipcRenderer.invoke('is-screen-locked')
 });
 
