@@ -9,6 +9,7 @@ const axios = require('axios/dist/node/axios.cjs');
 // Disable SSL/TLS validation for self-signed certificates in local/LAN environments
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 app.commandLine.appendSwitch('ignore-certificate-errors');
+app.commandLine.appendSwitch('enable-features', 'AllowWgcDesktopCapture,AllowWgcWindowCapture');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 function loadServerUrl() {
@@ -402,6 +403,7 @@ function createBlackoutWindow(progressInfo) {
 
     win.setIgnoreMouseEvents(true);
     win.setAlwaysOnTop(true, 'screen-saver');
+    win.setContentProtection(true);
     
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
     win.show();
@@ -572,6 +574,7 @@ function createLockWindow() {
 
     win.setIgnoreMouseEvents(true);
     win.setAlwaysOnTop(true, 'screen-saver');
+    win.setContentProtection(true);
     win.on('close', (e) => {
       if (!isClosingProgrammatically) {
         e.preventDefault();
