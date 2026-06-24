@@ -185,6 +185,10 @@ function RemoteSessionPage() {
   const [fileLoading, setFileLoading] = useState(false);
   const [transferringFile, setTransferringFile] = useState(null);
   const [showCadDropdown, setShowCadDropdown] = useState(false);
+  const [secureDesktopActive, setSecureDesktopActive] = useState(false);
+  const [secureDesktopFrame, setSecureDesktopFrame] = useState(null);
+  const [activeDesktopName, setActiveDesktopName] = useState('Default');
+  const imgRef = useRef(null);
 
   const videoRef = useRef(null);
   const peerRef = useRef(null);
@@ -361,6 +365,18 @@ function RemoteSessionPage() {
           link.remove();
           toast.success(`Downloaded: ${fileName}`);
           setTransferringFile(null);
+        },
+        onSecureDesktopFrame: (base64Frame) => {
+          setSecureDesktopFrame(base64Frame);
+        },
+        onActiveDesktop: (desktopName) => {
+          setActiveDesktopName(desktopName);
+          if (desktopName !== 'Default' && desktopName !== 'unknown') {
+            setSecureDesktopActive(true);
+          } else {
+            setSecureDesktopActive(false);
+            setSecureDesktopFrame(null);
+          }
         }
       });
     }
@@ -449,113 +465,90 @@ function RemoteSessionPage() {
   };
 
   // Mouse/keyboard relay
+  const getMouseCoords = (e) => {
+    const element = e.currentTarget;
+    const rect = element.getBoundingClientRect();
+    const width = element.naturalWidth || element.videoWidth;
+    const height = element.naturalHeight || element.videoHeight;
+    if (!width || !height) return null;
+
+    const elementRatio = width / height;
+    const rectRatio = rect.width / rect.height;
+    let contentWidth = rect.width;
+    let contentHeight = rect.height;
+    let contentLeft = rect.left;
+    let contentTop = rect.top;
+
+    if (rectRatio > elementRatio) {
+      contentWidth = rect.height * elementRatio;
+      contentLeft = rect.left + (rect.width - contentWidth) / 2;
+    } else {
+      contentHeight = rect.width / elementRatio;
+      contentTop = rect.top + (rect.height - contentHeight) / 2;
+    }
+
+    const ratioX = (e.clientX - contentLeft) / contentWidth;
+    const ratioY = (e.clientY - contentTop) / contentHeight;
+    const clampedX = Math.max(0, Math.min(1, ratioX));
+    const clampedY = Math.max(0, Math.min(1, ratioY));
+
+    return {
+      x: Math.round(clampedX * 10000),
+      y: Math.round(clampedY * 10000)
+    };
+  };
+
   const handleMouseMove = useCallback(async (e) => {
     if (annotation || !connected) return;
     const now = Date.now();
     if (now - lastMouseMoveTime.current < 50) return; // Throttle to 20 events per second
     lastMouseMoveTime.current = now;
 
-    const video = videoRef.current;
-    const rect = video?.getBoundingClientRect();
-    if (!rect || video.videoWidth === 0 || video.videoHeight === 0) return;
+    const coords = getMouseCoords(e);
+    if (!coords) return;
 
-    const videoRatio = video.videoWidth / video.videoHeight;
-    const rectRatio = rect.width / rect.height;
-    let contentWidth = rect.width;
-    let contentHeight = rect.height;
-    let contentLeft = rect.left;
-    let contentTop = rect.top;
-
-    if (rectRatio > videoRatio) {
-      // Pillarbox (black bars on left/right)
-      contentWidth = rect.height * videoRatio;
-      contentLeft = rect.left + (rect.width - contentWidth) / 2;
+    if (secureDesktopActive) {
+      await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'move', x: coords.x, y: coords.y }));
     } else {
-      // Letterbox (black bars on top/bottom)
-      contentHeight = rect.width / videoRatio;
-      contentTop = rect.top + (rect.height - contentHeight) / 2;
+      await signalRService.sendMouseMove(parseInt(deviceId), coords.x, coords.y);
     }
-
-    const ratioX = (e.clientX - contentLeft) / contentWidth;
-    const ratioY = (e.clientY - contentTop) / contentHeight;
-    
-    // Clamp ratios to [0, 1] to prevent out of bounds clicks
-    const clampedX = Math.max(0, Math.min(1, ratioX));
-    const clampedY = Math.max(0, Math.min(1, ratioY));
-
-    const x = Math.round(clampedX * 10000);
-    const y = Math.round(clampedY * 10000);
-    await signalRService.sendMouseMove(parseInt(deviceId), x, y);
-  }, [annotation, connected, deviceId]);
+  }, [annotation, connected, deviceId, secureDesktopActive]);
 
   const handleMouseDown = useCallback(async (e) => {
     if (annotation || !connected) return;
-    const video = videoRef.current;
-    const rect = video?.getBoundingClientRect();
-    if (!rect || video.videoWidth === 0 || video.videoHeight === 0) return;
+    const coords = getMouseCoords(e);
+    if (!coords) return;
 
-    const videoRatio = video.videoWidth / video.videoHeight;
-    const rectRatio = rect.width / rect.height;
-    let contentWidth = rect.width;
-    let contentHeight = rect.height;
-    let contentLeft = rect.left;
-    let contentTop = rect.top;
-
-    if (rectRatio > videoRatio) {
-      contentWidth = rect.height * videoRatio;
-      contentLeft = rect.left + (rect.width - contentWidth) / 2;
+    if (secureDesktopActive) {
+      await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'mousedown', x: coords.x, y: coords.y, button: e.button }));
     } else {
-      contentHeight = rect.width / videoRatio;
-      contentTop = rect.top + (rect.height - contentHeight) / 2;
+      await signalRService.sendMouseDown(parseInt(deviceId), coords.x, coords.y, e.button);
     }
-
-    const ratioX = (e.clientX - contentLeft) / contentWidth;
-    const ratioY = (e.clientY - contentTop) / contentHeight;
-    const clampedX = Math.max(0, Math.min(1, ratioX));
-    const clampedY = Math.max(0, Math.min(1, ratioY));
-
-    const x = Math.round(clampedX * 10000);
-    const y = Math.round(clampedY * 10000);
-    await signalRService.sendMouseDown(parseInt(deviceId), x, y, e.button);
-  }, [annotation, connected, deviceId]);
+  }, [annotation, connected, deviceId, secureDesktopActive]);
 
   const handleMouseUp = useCallback(async (e) => {
     if (annotation || !connected) return;
-    const video = videoRef.current;
-    const rect = video?.getBoundingClientRect();
-    if (!rect || video.videoWidth === 0 || video.videoHeight === 0) return;
+    const coords = getMouseCoords(e);
+    if (!coords) return;
 
-    const videoRatio = video.videoWidth / video.videoHeight;
-    const rectRatio = rect.width / rect.height;
-    let contentWidth = rect.width;
-    let contentHeight = rect.height;
-    let contentLeft = rect.left;
-    let contentTop = rect.top;
-
-    if (rectRatio > videoRatio) {
-      contentWidth = rect.height * videoRatio;
-      contentLeft = rect.left + (rect.width - contentWidth) / 2;
+    if (secureDesktopActive) {
+      await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'mouseup', x: coords.x, y: coords.y, button: e.button }));
+      // Send a click as well to guarantee interaction
+      await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'click', x: coords.x, y: coords.y, button: e.button }));
     } else {
-      contentHeight = rect.width / videoRatio;
-      contentTop = rect.top + (rect.height - contentHeight) / 2;
+      await signalRService.sendMouseUp(parseInt(deviceId), coords.x, coords.y, e.button);
     }
-
-    const ratioX = (e.clientX - contentLeft) / contentWidth;
-    const ratioY = (e.clientY - contentTop) / contentHeight;
-    const clampedX = Math.max(0, Math.min(1, ratioX));
-    const clampedY = Math.max(0, Math.min(1, ratioY));
-
-    const x = Math.round(clampedX * 10000);
-    const y = Math.round(clampedY * 10000);
-    await signalRService.sendMouseUp(parseInt(deviceId), x, y, e.button);
-  }, [annotation, connected, deviceId]);
+  }, [annotation, connected, deviceId, secureDesktopActive]);
 
   const handleWheel = useCallback(async (e) => {
     if (annotation || !connected) return;
-    // Map vertical scroll wheel deltas (standardized to -120 / +120 steps)
     const delta = e.deltaY > 0 ? -120 : 120;
-    await signalRService.sendMouseWheel(parseInt(deviceId), delta);
-  }, [annotation, connected, deviceId]);
+    if (secureDesktopActive) {
+      await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'wheel', delta }));
+    } else {
+      await signalRService.sendMouseWheel(parseInt(deviceId), delta);
+    }
+  }, [annotation, connected, deviceId, secureDesktopActive]);
 
   // Drag and Drop files directly onto the viewer canvas
   const handleDragOver = (e) => {
@@ -598,11 +591,21 @@ function RemoteSessionPage() {
   const handleKeyDown = useCallback(async (e) => {
     if (!connected || document.activeElement.tagName === 'INPUT') return;
     e.preventDefault();
-    await signalRService.sendKeyEvent(
-      parseInt(deviceId), e.key, true,
-      e.ctrlKey, e.altKey, e.shiftKey
-    );
-  }, [connected, deviceId]);
+    if (secureDesktopActive) {
+      await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({
+        type: 'key',
+        key: e.key,
+        ctrl: e.ctrlKey,
+        alt: e.altKey,
+        shift: e.shiftKey
+      }));
+    } else {
+      await signalRService.sendKeyEvent(
+        parseInt(deviceId), e.key, true,
+        e.ctrlKey, e.altKey, e.shiftKey
+      );
+    }
+  }, [connected, deviceId, secureDesktopActive]);
 
   // Annotation canvas
   function startDraw(e) {
@@ -779,20 +782,48 @@ function RemoteSessionPage() {
               onKeyDown={handleKeyDown}
               style={{ position: 'relative', flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#000', overflow: 'hidden' }}
             >
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                className="viewer-canvas"
-                style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'default' }}
-                onMouseMove={handleMouseMove}
-                onMouseDown={handleMouseDown}
-                onMouseUp={handleMouseUp}
-                onWheel={handleWheel}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-                onContextMenu={(e) => { e.preventDefault(); }}
-              />
+              {secureDesktopActive && (
+                <div style={{
+                  position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+                  background: 'rgba(59, 130, 246, 0.9)', backdropFilter: 'blur(8px)',
+                  color: '#fff', padding: '6px 16px', borderRadius: '9999px', fontSize: 12,
+                  fontWeight: 600, boxShadow: '0 4px 12px rgba(0,0,0,0.3)', display: 'flex',
+                  alignItems: 'center', gap: 6, zIndex: 10
+                }}>
+                  <span style={{ width: 8, height: 8, background: '#10B981', borderRadius: '50%', display: 'inline-block' }}></span>
+                  SECURE DESKTOP ACTIVE ({activeDesktopName.toUpperCase()})
+                </div>
+              )}
+              {secureDesktopActive && secureDesktopFrame ? (
+                <img
+                  ref={imgRef}
+                  src={`data:image/jpeg;base64,${secureDesktopFrame}`}
+                  className="viewer-canvas"
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'default' }}
+                  onMouseMove={handleMouseMove}
+                  onMouseDown={handleMouseDown}
+                  onMouseUp={handleMouseUp}
+                  onWheel={handleWheel}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                  onContextMenu={(e) => { e.preventDefault(); }}
+                />
+              ) : (
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  className="viewer-canvas"
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'default' }}
+                  onMouseMove={handleMouseMove}
+                  onMouseDown={handleMouseDown}
+                  onMouseUp={handleMouseUp}
+                  onWheel={handleWheel}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                  onContextMenu={(e) => { e.preventDefault(); }}
+                />
+              )}
               <canvas
                 ref={canvasRef}
                 className={`annotation-canvas ${annotation ? 'active' : ''}`}
@@ -804,7 +835,7 @@ function RemoteSessionPage() {
                 onMouseUp={stopDraw}
                 onMouseLeave={stopDraw}
               />
-              {!connected && (
+              {!connected && !secureDesktopActive && (
                 <div style={{
                   position: 'absolute', inset: 0, display: 'flex',
                   flexDirection: 'column', alignItems: 'center', justifyContent: 'center',

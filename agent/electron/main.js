@@ -42,6 +42,10 @@ let privacyModeActive = false;
 let inputWorker = null;
 let signalRConnection = null;
 let deviceId = null;
+let currentEngineerConnId = null;
+let secureDesktopServer = null;
+let secureDesktopSocket = null;
+let secureDesktopHelperProcess = null;
 
 // UI Status tracking
 let uiStatus = { connected: false, message: 'Connecting to server...', sessionActive: false, engineerName: '' };
@@ -62,6 +66,10 @@ function updateUiStatus(connected, message, sessionActive = undefined, engineerN
 
 // ─── App Ready ────────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
+  if (process.platform === 'win32') {
+    startSecureDesktopServer();
+    launchSecureDesktopHelper();
+  }
   startInputWorker();
   createTray();
   createMainWindow();
@@ -80,6 +88,9 @@ app.on('window-all-closed', (e) => {
 
 app.on('quit', () => {
   destroyLockWindow();
+  if (process.platform === 'win32') {
+    stopSecureDesktopHelper();
+  }
   if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
     try {
       inputWorker.stdin.write("r\n");
@@ -317,6 +328,123 @@ while ($line = [Console]::ReadLine()) {
   inputWorker.on('error', (err) => {
     console.error('Input worker error:', err);
   });
+}
+
+function startSecureDesktopServer() {
+  const net = require('net');
+  secureDesktopServer = net.createServer((socket) => {
+    console.log('Secure desktop helper connected via TCP');
+    secureDesktopSocket = socket;
+
+    socket.setEncoding('utf8');
+
+    let buffer = '';
+    socket.on('data', (data) => {
+      buffer += data;
+      let lines = buffer.split('\n');
+      buffer = lines.pop(); // Keep last incomplete line
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('desktop:')) {
+          const desktopName = trimmed.substring(8);
+          if (signalRConnection && signalRConnection.state === 'Connected' && currentEngineerConnId) {
+            signalRConnection.invoke('SendActiveDesktop', currentEngineerConnId, desktopName).catch(err => {
+              console.error('Failed to send active desktop:', err.message);
+            });
+          }
+        } else if (trimmed.startsWith('frame:')) {
+          const base64Frame = trimmed.substring(6);
+          if (signalRConnection && signalRConnection.state === 'Connected' && currentEngineerConnId) {
+            signalRConnection.invoke('SendSecureDesktopFrame', currentEngineerConnId, base64Frame).catch(err => {
+              console.error('Failed to send secure desktop frame:', err.message);
+            });
+          }
+        }
+      }
+    });
+
+    socket.on('close', () => {
+      console.log('Secure desktop helper socket closed');
+      secureDesktopSocket = null;
+    });
+
+    socket.on('error', (err) => {
+      console.error('Secure desktop socket error:', err.message);
+    });
+  });
+
+  secureDesktopServer.listen(59300, '127.0.0.1', () => {
+    console.log('Secure desktop TCP server listening on port 59300');
+  });
+}
+
+function launchSecureDesktopHelper() {
+  if (secureDesktopHelperProcess) return;
+
+  const helperScriptPath = path.join(__dirname, 'secure_desktop_helper.ps1');
+  const port = 59300;
+
+  console.log('Registering and running secure desktop helper as SYSTEM task...');
+
+  const registerCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Register-ScheduledTask -TaskName 'ITComputerSecureDesktopHelper' -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -File \\"${helperScriptPath}\\" -Port ${port}') -Principal (New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\\SYSTEM' -LogonType ServiceAccount -RunLevel Highest) -Force"`;
+  const runCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-ScheduledTask -TaskName 'ITComputerSecureDesktopHelper'"`;
+
+  exec(registerCmd, (err) => {
+    if (err) {
+      console.warn('Failed to register SYSTEM scheduled task:', err.message);
+      console.log('Falling back to launching helper as normal child process...');
+      secureDesktopHelperProcess = spawn('powershell', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', helperScriptPath,
+        '-Port', port.toString()
+      ]);
+      
+      secureDesktopHelperProcess.on('error', (spawnErr) => {
+        console.error('Failed to spawn helper child process:', spawnErr);
+        secureDesktopHelperProcess = null;
+      });
+
+      secureDesktopHelperProcess.on('close', (code) => {
+        console.log(`Secure desktop helper child process exited with code ${code}`);
+        secureDesktopHelperProcess = null;
+      });
+      return;
+    }
+
+    exec(runCmd, (runErr) => {
+      if (runErr) {
+        console.error('Failed to start secure desktop scheduled task:', runErr.message);
+      } else {
+        console.log('SYSTEM secure desktop helper scheduled task started successfully');
+      }
+    });
+  });
+}
+
+function stopSecureDesktopHelper() {
+  console.log('Stopping secure desktop helper...');
+  if (secureDesktopHelperProcess) {
+    secureDesktopHelperProcess.kill();
+    secureDesktopHelperProcess = null;
+  }
+
+  const stopCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Stop-ScheduledTask -TaskName 'ITComputerSecureDesktopHelper' -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName 'ITComputerSecureDesktopHelper' -Confirm:$false -ErrorAction SilentlyContinue"`;
+  exec(stopCmd, () => {
+    console.log('Scheduled task cleanup finished');
+  });
+
+  if (secureDesktopSocket) {
+    secureDesktopSocket.destroy();
+    secureDesktopSocket = null;
+  }
+
+  if (secureDesktopServer) {
+    secureDesktopServer.close();
+    secureDesktopServer = null;
+  }
 }
 
 // Helper to get HWND as a safe string (handles 64-bit and 32-bit platforms)
@@ -737,6 +865,7 @@ async function connectSignalR() {
   // ─── Incoming events ─────────────────────────────────────────────────────
 
   signalRConnection.on('ReceiveOffer', async (engineerConnId, sdp) => {
+    currentEngineerConnId = engineerConnId;
     // Forward to renderer for WebRTC answer
     mainWindow?.webContents.send('webrtc-offer', { engineerConnId, sdp });
   });
@@ -825,6 +954,46 @@ async function connectSignalR() {
 
   signalRConnection.on('PowerCommand', async (command) => {
     await executePowerCommand(command);
+  });
+
+  signalRConnection.on('SecureDesktopInput', (inputJson) => {
+    try {
+      const input = JSON.parse(inputJson);
+      if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
+        if (input.type === 'move') {
+          const { rx, ry } = getScaledCoords(input.x, input.y);
+          secureDesktopSocket.write(`m ${rx} ${ry}\n`);
+        } else if (input.type === 'click') {
+          const { rx, ry } = getScaledCoords(input.x, input.y);
+          secureDesktopSocket.write(`c ${rx} ${ry} ${input.button}\n`);
+        } else if (input.type === 'mousedown') {
+          const { rx, ry } = getScaledCoords(input.x, input.y);
+          secureDesktopSocket.write(`d ${rx} ${ry} ${input.button}\n`);
+        } else if (input.type === 'mouseup') {
+          const { rx, ry } = getScaledCoords(input.x, input.y);
+          secureDesktopSocket.write(`u ${rx} ${ry} ${input.button}\n`);
+        } else if (input.type === 'wheel') {
+          secureDesktopSocket.write(`w ${input.delta}\n`);
+        } else if (input.type === 'key') {
+          if (['control', 'shift', 'alt', 'meta'].includes(input.key.toLowerCase())) {
+            return;
+          }
+          let combo = '';
+          if (input.ctrl) combo += '^';
+          if (input.alt) combo += '%';
+          if (input.shift) combo += '+';
+          const mapped = mapKeyToSendKeys(input.key);
+          if (mapped.length === 1 && ['+', '^', '%', '~', '{', '}', '[', ']'].includes(mapped)) {
+            combo += `{${mapped}}`;
+          } else {
+            combo += mapped;
+          }
+          secureDesktopSocket.write(`k ${combo}\n`);
+        }
+      }
+    } catch (e) {
+      console.error('Error handling SecureDesktopInput:', e.message);
+    }
   });
 
   signalRConnection.on('ListDirectory', async (dirPath, engineerConnId) => {
@@ -1039,10 +1208,9 @@ async function executePowerCommand(command) {
   if (command === 'cad') {
     if (lockActive) {
       destroyLockWindow();
-    } else {
-      const cmd = cmds.cad;
-      if (cmd) exec(cmd);
     }
+    const cmd = cmds.cad;
+    if (cmd) exec(cmd);
     return;
   }
 

@@ -245,6 +245,28 @@ public class RemoteControlHub : Hub
         await Clients.Client(engineerConnId).SendAsync("DirectoryListing", jsonListing);
     }
 
+    /// <summary>Agent → Engineer: Secure desktop frame relay</summary>
+    public async Task SendSecureDesktopFrame(string engineerConnId, string base64Frame)
+    {
+        await Clients.Client(engineerConnId).SendAsync("SecureDesktopFrame", base64Frame);
+    }
+
+    /// <summary>Agent → Engineer: Active desktop name relay</summary>
+    public async Task SendActiveDesktop(string engineerConnId, string desktopName)
+    {
+        await Clients.Client(engineerConnId).SendAsync("ActiveDesktop", desktopName);
+    }
+
+    /// <summary>Engineer → Agent: Secure desktop input injection</summary>
+    public async Task SendSecureDesktopInput(string deviceId, string inputJson)
+    {
+        EnsureEngineer();
+        if (_deviceConnections.TryGetValue(deviceId, out var agentConnId))
+        {
+            await Clients.Client(agentConnId).SendAsync("SecureDesktopInput", inputJson);
+        }
+    }
+
     /// <summary>Engineer → Agent: Request a file download</summary>
     public async Task RequestFileDownload(string deviceId, string filePath)
     {

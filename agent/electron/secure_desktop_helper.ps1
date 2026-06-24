@@ -1,0 +1,234 @@
+param(
+    [int]$Port = 59300
+)
+
+# Load assemblies for PowerShell runspace
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
+
+# Add C# helper class for Win32 API interactions with explicit assembly references for compilation
+Add-Type -ReferencedAssemblies "System.Drawing", "System.Windows.Forms" -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
+
+public class Win32 {
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr OpenInputDesktop(uint dwFlags, bool fInherit, uint dwDesiredAccess);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool GetUserObjectInformation(IntPtr hObj, int nIndex, [Out] StringBuilder pvInfo, uint nLength, out uint lpnLengthNeeded);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool CloseDesktop(IntPtr hDesktop);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetThreadDesktop(IntPtr hDesktop);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetDesktopWindow();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindowDC(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [DllImport("gdi32.dll")]
+    public static extern bool BitBlt(IntPtr hdcDest, int nXDest, int nYDest, int nWidth, int nHeight, IntPtr hdcSrc, int nXSrc, int nYSrc, int dwRop);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, uint dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, uint dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern bool BlockInput(bool fBlockIt);
+
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    public const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+    public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+    public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
+    public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
+    public const uint MOUSEEVENTF_WHEEL = 0x0800;
+
+    private const int SRCCOPY = 0x00CC0020;
+    private const int CAPTUREBLT = 0x40000000;
+
+    public static string GetActiveDesktopName(ref bool canSwitch) {
+        canSwitch = false;
+        IntPtr hDesktop = OpenInputDesktop(0, false, 0x0181); // DESKTOP_READOBJECTS | DESKTOP_WRITEOBJECTS | DESKTOP_SWITCHDESKTOP
+        if (hDesktop == IntPtr.Zero) return "unknown";
+
+        StringBuilder sb = new StringBuilder(256);
+        uint needed;
+        string name = "unknown";
+        if (GetUserObjectInformation(hDesktop, 2, sb, (uint)sb.Capacity, out needed)) {
+            name = sb.ToString();
+        }
+
+        canSwitch = SetThreadDesktop(hDesktop);
+        CloseDesktop(hDesktop);
+        return name;
+    }
+
+    public static byte[] CaptureScreen(int width, int height, long quality) {
+        IntPtr hDesktop = OpenInputDesktop(0, false, 0x0181);
+        if (hDesktop != IntPtr.Zero) {
+            SetThreadDesktop(hDesktop);
+            CloseDesktop(hDesktop);
+        }
+
+        IntPtr hwnd = GetDesktopWindow();
+        IntPtr hdcSrc = GetWindowDC(hwnd);
+
+        using (Bitmap bmp = new Bitmap(width, height)) {
+            using (Graphics g = Graphics.FromImage(bmp)) {
+                IntPtr hdcDest = g.GetHdc();
+                BitBlt(hdcDest, 0, 0, width, height, hdcSrc, 0, 0, SRCCOPY | CAPTUREBLT);
+                g.ReleaseHdc(hdcDest);
+            }
+            ReleaseDC(hwnd, hdcSrc);
+
+            using (MemoryStream ms = new MemoryStream()) {
+                ImageCodecInfo jpgEncoder = GetEncoder(ImageFormat.Jpeg);
+                if (jpgEncoder == null) return new byte[0];
+                System.Drawing.Imaging.Encoder myEncoder = System.Drawing.Imaging.Encoder.Quality;
+                EncoderParameters myEncoderParameters = new EncoderParameters(1);
+                EncoderParameter myEncoderParameter = new EncoderParameter(myEncoder, quality);
+                myEncoderParameters.Param[0] = myEncoderParameter;
+
+                bmp.Save(ms, jpgEncoder, myEncoderParameters);
+                return ms.ToArray();
+            }
+        }
+    }
+
+    private static ImageCodecInfo GetEncoder(ImageFormat format) {
+        ImageCodecInfo[] codecs = ImageCodecInfo.GetImageDecoders();
+        foreach (ImageCodecInfo codec in codecs) {
+            if (codec.FormatID == format.Guid) {
+                return codec;
+            }
+        }
+        return null;
+    }
+
+    public static void Move(int x, int y) {
+        SetCursorPos(x, y);
+    }
+
+    public static void Click(int x, int y, int button) {
+        SetCursorPos(x, y);
+        uint down = MOUSEEVENTF_LEFTDOWN;
+        uint up = MOUSEEVENTF_LEFTUP;
+        if (button == 2) {
+            down = MOUSEEVENTF_RIGHTDOWN;
+            up = MOUSEEVENTF_RIGHTUP;
+        } else if (button == 1) {
+            down = MOUSEEVENTF_MIDDLEDOWN;
+            up = MOUSEEVENTF_MIDDLEUP;
+        }
+        mouse_event(down, 0, 0, 0, 0);
+        System.Threading.Thread.Sleep(15);
+        mouse_event(up, 0, 0, 0, 0);
+    }
+
+    public static void MouseDown(int x, int y, int button) {
+        SetCursorPos(x, y);
+        uint flag = MOUSEEVENTF_LEFTDOWN;
+        if (button == 2) flag = MOUSEEVENTF_RIGHTDOWN;
+        else if (button == 1) flag = MOUSEEVENTF_MIDDLEDOWN;
+        mouse_event(flag, 0, 0, 0, 0);
+    }
+
+    public static void MouseUp(int x, int y, int button) {
+        SetCursorPos(x, y);
+        uint flag = MOUSEEVENTF_LEFTUP;
+        if (button == 2) flag = MOUSEEVENTF_RIGHTUP;
+        else if (button == 1) flag = MOUSEEVENTF_MIDDLEUP;
+        mouse_event(flag, 0, 0, 0, 0);
+    }
+
+    public static void MouseWheel(int delta) {
+        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)delta, 0);
+    }
+}
+"@
+
+# Connect to the Electron TCP server
+$client = New-Object System.Net.Sockets.TcpClient
+try {
+    $client.Connect("127.0.0.1", $Port)
+    $stream = $client.GetStream()
+    $reader = New-Object System.IO.StreamReader($stream)
+    $writer = New-Object System.IO.StreamWriter($stream)
+    $writer.AutoFlush = $true
+
+    # Get primary screen size
+    $screen = [System.Windows.Forms.Screen]::PrimaryScreen
+    $width = $screen.Bounds.Width
+    $height = $screen.Bounds.Height
+
+    # Start main loop
+    while ($client.Connected) {
+        try {
+            # 1. Non-blocking input reading from socket
+            while ($stream.DataAvailable) {
+                $line = $reader.ReadLine()
+                if ($line) {
+                    # Ensure the calling thread switches to the input desktop before executing injection
+                    $canSwitch = $false
+                    [Win32]::GetActiveDesktopName([ref]$canSwitch)
+
+                    $parts = $line.Split(' ')
+                    if ($parts[0] -eq 'm') {
+                        [Win32]::Move([int]$parts[1], [int]$parts[2])
+                    } elseif ($parts[0] -eq 'c') {
+                        [Win32]::Click([int]$parts[1], [int]$parts[2], [int]$parts[3])
+                    } elseif ($parts[0] -eq 'd') {
+                        [Win32]::MouseDown([int]$parts[1], [int]$parts[2], [int]$parts[3])
+                    } elseif ($parts[0] -eq 'u') {
+                        [Win32]::MouseUp([int]$parts[1], [int]$parts[2], [int]$parts[3])
+                    } elseif ($parts[0] -eq 'w') {
+                        [Win32]::MouseWheel([int]$parts[1])
+                    } elseif ($parts[0] -eq 'k') {
+                        $keyStr = $line.Substring(2)
+                        [System.Windows.Forms.SendKeys]::SendWait($keyStr)
+                    }
+                }
+            }
+
+            # 2. Check active desktop
+            $canSwitch = $false
+            $name = [Win32]::GetActiveDesktopName([ref]$canSwitch)
+
+            $writer.WriteLine("desktop:$name")
+
+            # 3. Capture screen if we are on a secure/Winlogon desktop
+            if ($name -ne "Default" -and $name -ne "unknown") {
+                $bytes = [Win32]::CaptureScreen($width, $height, 60)
+                if ($bytes -and $bytes.Length -gt 0) {
+                    $base64 = [Convert]::ToBase64String($bytes)
+                    $writer.WriteLine("frame:$base64")
+                }
+            }
+        } catch {
+            # Prevent loop crash, sleep slightly and continue
+        }
+        
+        Start-Sleep -Milliseconds 250
+    }
+} catch {
+    # Socket connection failed
+} finally {
+    if ($client) { $client.Close() }
+}

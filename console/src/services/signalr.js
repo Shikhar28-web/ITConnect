@@ -31,6 +31,8 @@ class SignalRService {
     if (handlers.onRegistryData) this.remoteControlHub.on('RegistryData', handlers.onRegistryData);
     if (handlers.onClipboardData) this.remoteControlHub.on('ClipboardData', handlers.onClipboardData);
     if (handlers.onFileDownloadReady) this.remoteControlHub.on('FileDownloadReady', handlers.onFileDownloadReady);
+    if (handlers.onSecureDesktopFrame) this.remoteControlHub.on('SecureDesktopFrame', handlers.onSecureDesktopFrame);
+    if (handlers.onActiveDesktop) this.remoteControlHub.on('ActiveDesktop', handlers.onActiveDesktop);
 
     await this.remoteControlHub.start();
     return this.remoteControlHub.connectionId;
@@ -161,6 +163,10 @@ class SignalRService {
 
   async sendAnnotation(deviceId, annotationJson) {
     await this.remoteControlHub?.invoke('SendAnnotation', deviceId.toString(), annotationJson);
+  }
+
+  async sendSecureDesktopInput(deviceId, inputJson) {
+    await this.remoteControlHub?.invoke('SendSecureDesktopInput', deviceId.toString(), inputJson);
   }
 
   // ─── Chat Methods ─────────────────────────────────────────────────────────
