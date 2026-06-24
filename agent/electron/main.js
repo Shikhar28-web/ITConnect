@@ -489,7 +489,7 @@ function createBlackoutWindow(progressInfo) {
       y: d.bounds.y,
       width: d.bounds.width,
       height: d.bounds.height,
-      fullscreen: true,
+      fullscreen: false,
       alwaysOnTop: true,
       frame: false,
       skipTaskbar: true,
@@ -503,7 +503,7 @@ function createBlackoutWindow(progressInfo) {
       }
     });
 
-    win.setIgnoreMouseEvents(true, { forward: true });
+    win.setIgnoreMouseEvents(false);
     win.setAlwaysOnTop(true, 'screen-saver');
     
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
@@ -851,6 +851,23 @@ function getCPUUsage() {
   });
 }
 
+function withClickThrough(action) {
+  const activeWindows = blackoutWindows.filter(win => win && !win.isDestroyed());
+  for (const win of activeWindows) {
+    win.setIgnoreMouseEvents(true);
+  }
+  
+  action();
+  
+  setTimeout(() => {
+    for (const win of activeWindows) {
+      if (!win.isDestroyed()) {
+        win.setIgnoreMouseEvents(false);
+      }
+    }
+  }, 20);
+}
+
 // ─── SignalR Connection ───────────────────────────────────────────────────────
 async function connectSignalR() {
   if (!deviceId) {
@@ -895,27 +912,35 @@ async function connectSignalR() {
 
   signalRConnection.on('MouseClick', async (x, y, button) => {
     const { rx, ry } = getScaledCoords(x, y);
-    await injectMouseClick(rx, ry, button);
+    withClickThrough(() => {
+      injectMouseClick(rx, ry, button);
+    });
   });
 
   signalRConnection.on('MouseDown', async (x, y, button) => {
     const { rx, ry } = getScaledCoords(x, y);
-    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-      inputWorker.stdin.write(`d ${rx} ${ry} ${button}\n`);
-    }
+    withClickThrough(() => {
+      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+        inputWorker.stdin.write(`d ${rx} ${ry} ${button}\n`);
+      }
+    });
   });
 
   signalRConnection.on('MouseUp', async (x, y, button) => {
     const { rx, ry } = getScaledCoords(x, y);
-    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-      inputWorker.stdin.write(`u ${rx} ${ry} ${button}\n`);
-    }
+    withClickThrough(() => {
+      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+        inputWorker.stdin.write(`u ${rx} ${ry} ${button}\n`);
+      }
+    });
   });
 
   signalRConnection.on('MouseWheel', async (delta) => {
-    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-      inputWorker.stdin.write(`w ${delta}\n`);
-    }
+    withClickThrough(() => {
+      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+        inputWorker.stdin.write(`w ${delta}\n`);
+      }
+    });
   });
 
   signalRConnection.on('KeyEvent', async (key, isDown, ctrl, alt, shift) => {
