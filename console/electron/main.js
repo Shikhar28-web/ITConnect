@@ -4,6 +4,8 @@ const path = require('path');
 const isDev = !app.isPackaged;
 let mainWindow = null;
 
+app.commandLine.appendSwitch('ignore-certificate-errors');
+
 app.whenReady().then(() => {
   createMainWindow();
 });
