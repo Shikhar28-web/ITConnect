@@ -490,58 +490,70 @@ function createBlackoutWindow(progressInfo) {
       <meta charset="UTF-8">
       <title>Screen Blacked Out</title>
       <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; cursor: none !important; }
-        body {
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+          width: 100%; height: 100%;
           background: #000;
-          color: #fff;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          height: 100vh;
-          font-family: 'Segoe UI', sans-serif;
+          overflow: hidden;
+          cursor: none !important;
           user-select: none;
+        }
+        #word {
+          position: absolute;
+          font-family: 'Segoe UI', Arial, sans-serif;
+          font-size: 48px;
+          font-weight: 700;
+          color: #fff;
+          white-space: nowrap;
+          pointer-events: none;
           cursor: none !important;
         }
-        .logo { font-size: 48px; margin-bottom: 24px; }
-        .company { font-size: 28px; font-weight: 700; color: #4A9EFF; margin-bottom: 40px; }
-        .title { font-size: 22px; font-weight: 600; margin-bottom: 16px; }
-        .message { font-size: 16px; color: #aaa; text-align: center; max-width: 500px; line-height: 1.6; margin-bottom: 32px; }
-        .progress-bar {
-          width: 400px;
-          height: 8px;
-          background: #333;
-          border-radius: 4px;
-          overflow: hidden;
-          margin-bottom: 12px;
-        }
-        .progress-fill {
-          height: 100%;
-          background: linear-gradient(90deg, #4A9EFF, #7B61FF);
-          border-radius: 4px;
-          animation: progress 3s ease-in-out infinite alternate;
-        }
-        @keyframes progress {
-          from { width: 20%; }
-          to { width: 90%; }
-        }
-        .info { font-size: 13px; color: #666; }
-        .ticket { margin-top: 20px; font-size: 14px; color: #4A9EFF; }
       </style>
     </head>
     <body>
-      <div class="logo">🖥️</div>
-      <div class="company">ITConnect Support</div>
-      <div class="title">Remote Maintenance in Progress</div>
-      <div class="message">
-        Your administrator has temporarily blacked out this screen to perform secure operations.
-        Please stand by while maintenance is completed.
-      </div>
-      <div class="progress-bar">
-        <div class="progress-fill"></div>
-      </div>
-      <div class="info">Do not power off or disconnect your computer.</div>
-      ${progressInfo ? `<div class="ticket">${progressInfo}</div>` : ''}
+      <div id="word">ITConnect</div>
+      <script>
+        const el = document.getElementById('word');
+        const colors = ['#ffffff', '#4A9EFF', '#7B61FF', '#00e5ff', '#ff6ec7', '#a3ff6e'];
+        let x = 80, y = 80;
+        let vx = 1.2, vy = 0.9;
+        let ci = 0;
+
+        function step() {
+          const W = window.innerWidth;
+          const H = window.innerHeight;
+          const ew = el.offsetWidth;
+          const eh = el.offsetHeight;
+
+          x += vx;
+          y += vy;
+
+          let bounced = false;
+          if (x + ew >= W) { x = W - ew; vx = -Math.abs(vx); bounced = true; }
+          if (x <= 0)       { x = 0;       vx =  Math.abs(vx); bounced = true; }
+          if (y + eh >= H)  { y = H - eh;  vy = -Math.abs(vy); bounced = true; }
+          if (y <= 0)       { y = 0;       vy =  Math.abs(vy); bounced = true; }
+
+          if (bounced) {
+            ci = (ci + 1) % colors.length;
+            el.style.color = colors[ci];
+          }
+
+          el.style.left = x + 'px';
+          el.style.top  = y + 'px';
+          requestAnimationFrame(step);
+        }
+
+        window.addEventListener('load', () => {
+          el.style.left = x + 'px';
+          el.style.top  = y + 'px';
+          requestAnimationFrame(step);
+        });
+
+        // Block any key events on this overlay
+        window.addEventListener('keydown', e => e.preventDefault(), true);
+        window.addEventListener('mousedown', e => e.preventDefault(), true);
+      </script>
     </body>
     </html>
   `;
@@ -553,7 +565,10 @@ function createBlackoutWindow(progressInfo) {
       y: d.bounds.y,
       width: d.bounds.width,
       height: d.bounds.height,
-      fullscreen: false,
+      // fullscreen: true ensures the window covers the Windows taskbar on the physical monitor.
+      // setContentProtection(true) below makes this window invisible to WebRTC capture,
+      // so the admin still sees the desktop underneath — only the employee's physical screen is blacked out.
+      fullscreen: true,
       alwaysOnTop: true,
       frame: false,
       skipTaskbar: true,
@@ -567,13 +582,17 @@ function createBlackoutWindow(progressInfo) {
       }
     });
 
-    win.setIgnoreMouseEvents(false); // Swallow local clicks by default
+    // setIgnoreMouseEvents(true) so Electron doesn't intercept admin's injected input;
+    // local employee input is already blocked at OS level via BlockInput + HideGlobalCursor.
+    win.setIgnoreMouseEvents(true);
     win.setAlwaysOnTop(true, 'screen-saver', 1);
+    // Exclude this window from screen capture so admin sees desktop underneath
     win.setContentProtection(true);
-    
+
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
     win.show();
 
+    // Force it above the taskbar shell using Win32 HWND
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       const hwnd = getHwndString(win);
       inputWorker.stdin.write(`e ${hwnd}\n`);
@@ -943,19 +962,16 @@ async function connectSignalR() {
   };
 
   signalRConnection.on('MouseMove', async (x, y) => {
-    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     await injectMouseMove(rx, ry);
   });
 
   signalRConnection.on('MouseClick', async (x, y, button) => {
-    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     await injectMouseClick(rx, ry, button);
   });
 
   signalRConnection.on('MouseDown', async (x, y, button) => {
-    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`d ${rx} ${ry} ${button}\n`);
@@ -963,7 +979,6 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('MouseUp', async (x, y, button) => {
-    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`u ${rx} ${ry} ${button}\n`);
@@ -971,7 +986,6 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('MouseWheel', async (delta) => {
-    tempAllowClickThrough();
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`w ${delta}\n`);
     }
