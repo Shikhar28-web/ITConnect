@@ -132,14 +132,16 @@ public sealed class PipeServer : IDisposable
             PipeAccessRights.FullControl,
             AccessControlType.Allow));
 
-        // Current user (the logged-on user running the Electron agent) read/write
-        pipeSecurity.AddAccessRule(new PipeAccessRule(
-            WindowsIdentity.GetCurrent().User
-                ?? new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
-            PipeAccessRights.ReadWrite,
-            AccessControlType.Allow));
+        // Current user (the server process owner) needs FullControl so it has permissions to create subsequent instances of the pipe
+        if (WindowsIdentity.GetCurrent().User is { } ownerSid)
+        {
+            pipeSecurity.AddAccessRule(new PipeAccessRule(
+                ownerSid,
+                PipeAccessRights.FullControl,
+                AccessControlType.Allow));
+        }
 
-        // Authenticated users (covers domain accounts, local accounts)
+        // Authenticated users (covers the Electron agent running under any user session)
         pipeSecurity.AddAccessRule(new PipeAccessRule(
             new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
             PipeAccessRights.ReadWrite,

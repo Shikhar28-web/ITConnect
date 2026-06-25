@@ -238,7 +238,7 @@ async function sendServiceCommand(command) {
     });
 
     // Timeout after 5 seconds
-    setTimeout(() => { try { client.destroy(); } catch (_) {} resolve(null); }, 5000);
+    setTimeout(() => { try { client.destroy(); } catch (_) { } resolve(null); }, 5000);
   });
 }
 
@@ -251,14 +251,14 @@ async function startSecureDesktopPolling() {
     const desktopName = await sendServiceCommand('DESKTOP_NAME');
     if (!desktopName) return;
 
-    await signalRConnection.invoke('SendActiveDesktop', currentEngineerConnId, desktopName).catch(() => {});
+    await signalRConnection.invoke('SendActiveDesktop', currentEngineerConnId, desktopName).catch(() => { });
 
     // If on a secure desktop, capture and send the frame
     const isSecure = desktopName !== 'Default' && desktopName !== 'Unknown' && desktopName !== null;
     if (isSecure) {
       const frame = await sendServiceCommand('CAPTURE_SECURE');
       if (frame && frame !== 'NONE') {
-        await signalRConnection.invoke('SendSecureDesktopFrame', currentEngineerConnId, frame).catch(() => {});
+        await signalRConnection.invoke('SendSecureDesktopFrame', currentEngineerConnId, frame).catch(() => { });
       }
     }
   }, 100); // Poll every 100ms for responsive desktop switch detection
@@ -666,8 +666,8 @@ async function connectSignalR() {
     // Use new InputHelper protocol: k <key> <isDown> <ctrl> <alt> <shift>
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       const d = isDown ? 1 : 0;
-      const c = ctrl  ? 1 : 0;
-      const a = alt   ? 1 : 0;
+      const c = ctrl ? 1 : 0;
+      const a = alt ? 1 : 0;
       const s = shift ? 1 : 0;
       inputWorker.stdin.write(`k ${key} ${d} ${c} ${a} ${s}\n`);
     }
@@ -728,8 +728,8 @@ async function connectSignalR() {
         inputWorker.stdin.write(`w ${input.delta}\n`);
       } else if (input.type === 'key') {
         const d = input.isDown ? 1 : 0;
-        const c = input.ctrl  ? 1 : 0;
-        const a = input.alt   ? 1 : 0;
+        const c = input.ctrl ? 1 : 0;
+        const a = input.alt ? 1 : 0;
         const s = input.shift ? 1 : 0;
         inputWorker.stdin.write(`k ${input.key} ${d} ${c} ${a} ${s}\n`);
       }
