@@ -17,6 +17,23 @@ public sealed class Worker : BackgroundService
     {
         _log.LogInformation("ITComputer Windows Service starting (PID {Pid})", Environment.ProcessId);
 
+        // Configure SoftwareSASGeneration in HKLM registry to allow sending Ctrl+Alt+Delete (SAS)
+        try
+        {
+            using (var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", true))
+            {
+                if (key != null)
+                {
+                    key.SetValue("SoftwareSASGeneration", 3, Microsoft.Win32.RegistryValueKind.DWord);
+                    _log.LogInformation("Successfully configured SoftwareSASGeneration (value=3) in registry.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to configure SoftwareSASGeneration in HKLM registry.");
+        }
+
         _pipeServer = new PipeServer(
             _log.CreateLogger<PipeServer>(),
             stoppingToken);

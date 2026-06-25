@@ -184,7 +184,7 @@ function startInputWorker() {
   // In dev: look next to this script. In prod: next to the packaged app.
   const helperName = 'ITComputer.InputHelper.exe';
   const helperPath = isDev
-    ? path.join(__dirname, '../../native/ITComputer.InputHelper/bin/Release/net10.0-windows/win-x64/publish', helperName)
+    ? path.join(__dirname, '../native/ITComputer.InputHelper/bin/Release/net10.0-windows/win-x64/publish', helperName)
     : path.join(process.resourcesPath, helperName);
 
   if (!fs.existsSync(helperPath)) {
