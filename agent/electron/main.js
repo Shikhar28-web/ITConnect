@@ -297,6 +297,22 @@ public class Win32Input {
     public static void ExcludeFromCapture(IntPtr hwnd) {
         SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
     }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern uint SetThreadExecutionState(uint esFlags);
+
+    public const uint ES_CONTINUOUS = 0x80000000;
+    public const uint ES_SYSTEM_REQUIRED = 0x00000001;
+    public const uint ES_DISPLAY_REQUIRED = 0x00000002;
+    public const uint ES_AWAYMODE_REQUIRED = 0x00000040;
+
+    public static void KeepAwake(bool enable) {
+        if (enable) {
+            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED | ES_AWAYMODE_REQUIRED);
+        } else {
+            SetThreadExecutionState(ES_CONTINUOUS);
+        }
+    }
 }
 "@
 Add-Type -AssemblyName System.Windows.Forms
@@ -327,6 +343,8 @@ while ($line = [Console]::ReadLine()) {
         } elseif ($parts[0] -eq 'e') {
             $hwnd = [IntPtr][long]$parts[1]
             [Win32Input]::ExcludeFromCapture($hwnd)
+        } elseif ($parts[0] -eq 'a') {
+            [Win32Input]::KeepAwake([int]$parts[1] -eq 1)
         }
     } catch {
         # ignore error
@@ -1266,14 +1284,61 @@ function executeShellCommand(shell, command) {
 // ─── Power Commands ───────────────────────────────────────────────────────────
 async function executePowerCommand(command) {
   const sasScriptPath = path.join(__dirname, 'send_sas.ps1');
+
+  // Handle Awake mode
+  if (command === 'awake_on') {
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      inputWorker.stdin.write("a 1\n");
+    }
+    return;
+  }
+  if (command === 'awake_off') {
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      inputWorker.stdin.write("a 0\n");
+    }
+    return;
+  }
+
+  // Handle custom run commands
+  if (command.startsWith('run:')) {
+    const customCmd = command.substring(4);
+    if (customCmd) {
+      exec(customCmd);
+    }
+    return;
+  }
+
+  // Handle custom URLs
+  if (command.startsWith('url:')) {
+    const url = command.substring(4);
+    if (url) {
+      try {
+        const { shell } = require('electron');
+        shell.openExternal(url);
+      } catch (err) {
+        console.error('Failed to open URL on agent:', err.message);
+      }
+    }
+    return;
+  }
+
   const cmds = {
     restart: process.platform === 'win32' ? 'shutdown /r /t 10' : 'sudo shutdown -r +1',
     shutdown: process.platform === 'win32' ? 'shutdown /s /t 10' : 'sudo shutdown -h +1',
     logoff: process.platform === 'win32' ? 'logoff' : 'pkill -u $(whoami)',
     safemode: 'bcdedit /set {current} safeboot minimal && shutdown /r /t 10',
     cad: process.platform === 'win32' ? `powershell -NoProfile -ExecutionPolicy Bypass -File "${sasScriptPath}"` : '',
-    lock: process.platform === 'win32' ? 'rundll32.exe user32.dll,LockWorkStation' : '',
-    taskmgr: process.platform === 'win32' ? 'taskmgr.exe' : ''
+    lock: process.platform === 'win32' ? 'rundll32.exe user32.dll,LockWorkStation' : '', // Custom lock overlay is toggled below, native lock is wslock
+    wslock: process.platform === 'win32' ? 'rundll32.exe user32.dll,LockWorkStation' : '',
+    taskmgr: process.platform === 'win32' ? 'taskmgr.exe' : '',
+    cmd: process.platform === 'win32' ? 'start cmd.exe' : '',
+    powershell: process.platform === 'win32' ? 'start powershell.exe' : '',
+    regedit: process.platform === 'win32' ? 'regedit.exe' : '',
+    devmgmt: process.platform === 'win32' ? 'devmgmt.msc' : '',
+    services: process.platform === 'win32' ? 'services.msc' : '',
+    eventvwr: process.platform === 'win32' ? 'eventvwr.msc' : '',
+    control: process.platform === 'win32' ? 'control.exe' : '',
+    msinfo32: process.platform === 'win32' ? 'msinfo32.exe' : ''
   };
 
   if (command === 'lock') {

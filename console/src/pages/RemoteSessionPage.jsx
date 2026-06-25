@@ -184,7 +184,9 @@ function RemoteSessionPage() {
   const [currentPath, setCurrentPath] = useState('C:\\');
   const [fileLoading, setFileLoading] = useState(false);
   const [transferringFile, setTransferringFile] = useState(null);
-  const [showCadDropdown, setShowCadDropdown] = useState(false);
+  const [showToolsDropdown, setShowToolsDropdown] = useState(false);
+  const [customLaunchInput, setCustomLaunchInput] = useState('');
+  const [keepAwake, setKeepAwake] = useState(false);
   const [secureDesktopActive, setSecureDesktopActive] = useState(false);
   const [secureDesktopFrame, setSecureDesktopFrame] = useState(null);
   const [activeDesktopName, setActiveDesktopName] = useState('Default');
@@ -239,15 +241,15 @@ function RemoteSessionPage() {
 
   // Handle click outside dropdown to close it
   useEffect(() => {
-    if (!showCadDropdown) return;
+    if (!showToolsDropdown) return;
     const handleOutsideClick = (e) => {
-      if (!e.target.closest('#btn-cad-dropdown')) {
-        setShowCadDropdown(false);
+      if (!e.target.closest('#btn-tools-dropdown')) {
+        setShowToolsDropdown(false);
       }
     };
     document.addEventListener('click', handleOutsideClick);
     return () => document.removeEventListener('click', handleOutsideClick);
-  }, [showCadDropdown]);
+  }, [showToolsDropdown]);
 
   // Auto sync admin clipboard to remote agent
   useEffect(() => {
@@ -722,57 +724,193 @@ function RemoteSessionPage() {
                 >🔄 Reconnect</button>
               </div>
 
-              <div className="toolbar-group" style={{ marginLeft: 'auto' }}>
+              <div className="toolbar-group" style={{ marginLeft: 'auto', position: 'relative' }} id="btn-tools-dropdown">
                 <button
-                  className="toolbar-btn danger"
-                  title="Send Ctrl+Alt+Del"
-                  onClick={() => {
-                    signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'cad');
-                    toast.info('Sending Ctrl+Alt+Delete command to remote host...');
-                  }}
-                  style={{ width: 'auto', padding: '0 8px' }}
-                >⌨️ CAD</button>
-                <button
-                  className="toolbar-btn danger"
-                  title="Lock Workstation"
-                  onClick={() => {
-                    signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'lock');
-                    toast.info('Locking remote workstation...');
-                  }}
-                >🔒</button>
-                <button
-                  className="toolbar-btn danger"
-                  title="Open Task Manager"
-                  onClick={() => {
-                    signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'taskmgr');
-                    toast.info('Opening remote Task Manager...');
-                  }}
-                >⚙️</button>
-                <button
-                  className="toolbar-btn danger"
-                  title="Log Off / Sign Out"
-                  onClick={() => {
-                    signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'logoff');
-                    toast.info('Signing out remote user...');
-                  }}
-                >👤</button>
-                <button
-                  className="toolbar-btn danger"
-                  title="Restart"
-                  onClick={() => {
-                    signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'restart');
-                    toast.info('Restarting remote host...');
-                  }}
-                >🔄</button>
-                <button
-                  className="toolbar-btn danger"
-                  title="Shutdown"
-                  onClick={() => {
-                    signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'shutdown');
-                    toast.info('Shutting down remote host...');
-                  }}
-                >⏻</button>
-              </div>
+                  className={`toolbar-btn ${showToolsDropdown ? 'active' : ''}`}
+                  title="Quick Tools & System Actions"
+                  onClick={() => setShowToolsDropdown(!showToolsDropdown)}
+                  style={{ width: 'auto', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 500 }}
+                >
+                  🛠️ Quick Tools <span style={{ fontSize: '10px' }}>{showToolsDropdown ? '▲' : '▼'}</span>
+                </button>
+
+                {showToolsDropdown && (
+                  <div className="tools-dropdown-menu">
+                    <div className="tools-dropdown-section">
+                      <div className="tools-dropdown-section-title">💻 Administrative Tools</div>
+                      <div className="tools-grid">
+                        <button className="tools-item-btn" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'cmd');
+                          toast.success('Launching Command Prompt on remote PC...');
+                        }}>
+                          <span className="tools-item-icon">💻</span>
+                          <span className="tools-item-text">Command Prompt</span>
+                        </button>
+                        <button className="tools-item-btn" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'powershell');
+                          toast.success('Launching PowerShell on remote PC...');
+                        }}>
+                          <span className="tools-item-icon">⚡</span>
+                          <span className="tools-item-text">PowerShell</span>
+                        </button>
+                        <button className="tools-item-btn" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'taskmgr');
+                          toast.success('Opening Task Manager...');
+                        }}>
+                          <span className="tools-item-icon">⚙️</span>
+                          <span className="tools-item-text">Task Manager</span>
+                        </button>
+                        <button className="tools-item-btn" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'regedit');
+                          toast.success('Opening Registry Editor...');
+                        }}>
+                          <span className="tools-item-icon">🔑</span>
+                          <span className="tools-item-text">Registry Editor</span>
+                        </button>
+                        <button className="tools-item-btn" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'devmgmt');
+                          toast.success('Opening Device Manager...');
+                        }}>
+                          <span className="tools-item-icon">🔧</span>
+                          <span className="tools-item-text">Device Manager</span>
+                        </button>
+                        <button className="tools-item-btn" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'services');
+                          toast.success('Opening Services Manager...');
+                        }}>
+                          <span className="tools-item-icon">📁</span>
+                          <span className="tools-item-text">Services</span>
+                        </button>
+                        <button className="tools-item-btn" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'eventvwr');
+                          toast.success('Opening Event Viewer...');
+                        }}>
+                          <span className="tools-item-icon">📊</span>
+                          <span className="tools-item-text">Event Viewer</span>
+                        </button>
+                        <button className="tools-item-btn" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'control');
+                          toast.success('Opening Control Panel...');
+                        }}>
+                          <span className="tools-item-icon">🎛️</span>
+                          <span className="tools-item-text">Control Panel</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="tools-dropdown-section">
+                      <div className="tools-dropdown-section-title">⚡ System State & Power</div>
+                      <div className="tools-grid">
+                        <button className="tools-item-btn danger" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'lock');
+                          toast.info('Toggling Workspace Lock overlay...');
+                        }}>
+                          <span className="tools-item-icon">🔒</span>
+                          <span className="tools-item-text">Workspace Lock (Overlay)</span>
+                        </button>
+                        <button className="tools-item-btn danger" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'wslock');
+                          toast.info('Locking Windows workstation...');
+                        }}>
+                          <span className="tools-item-icon">🖥️</span>
+                          <span className="tools-item-text">Lock Windows (Native)</span>
+                        </button>
+                        <button className="tools-item-btn danger" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'logoff');
+                          toast.warning('Signing out remote user...');
+                        }}>
+                          <span className="tools-item-icon">👤</span>
+                          <span className="tools-item-text">Sign Out / Log Off</span>
+                        </button>
+                        <button className="tools-item-btn danger" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'restart');
+                          toast.warning('Restarting remote host...');
+                        }}>
+                          <span className="tools-item-icon">🔄</span>
+                          <span className="tools-item-text">Restart Computer</span>
+                        </button>
+                        <button className="tools-item-btn danger" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'shutdown');
+                          toast.warning('Shutting down remote host...');
+                        }}>
+                          <span className="tools-item-icon">⏻</span>
+                          <span className="tools-item-text">Shutdown Computer</span>
+                        </button>
+                        <button className="tools-item-btn danger" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'safemode');
+                          toast.warning('Rebooting to Safe Mode...');
+                        }}>
+                          <span className="tools-item-icon">🛡️</span>
+                          <span className="tools-item-text">Boot to Safe Mode</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="tools-dropdown-section">
+                      <div className="tools-dropdown-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span>☕ Keep Awake Mode</span>
+                        <span style={{ fontSize: '11px', color: keepAwake ? 'var(--accent-green)' : 'var(--text-muted)' }}>
+                          {keepAwake ? '● ACTIVE' : '○ INACTIVE'}
+                        </span>
+                      </div>
+                      <div style={{ padding: '4px 8px' }}>
+                        <label className="tools-toggle-label" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px' }}>
+                          <input
+                            type="checkbox"
+                            checked={keepAwake}
+                            onChange={async (e) => {
+                              const enabled = e.target.checked;
+                              setKeepAwake(enabled);
+                              await signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), enabled ? 'awake_on' : 'awake_off');
+                              toast.info(enabled ? '☕ Keep Awake enabled (prevent sleep/lock)' : '☕ Keep Awake disabled');
+                            }}
+                            style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                          />
+                          Prevent remote PC from sleeping or locking
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="tools-dropdown-section" style={{ borderBottom: 'none', marginBottom: 0, paddingBottom: 0 }}>
+                      <div className="tools-dropdown-section-title">🚀 Launch Custom App / Open URL</div>
+                      <div style={{ display: 'flex', gap: '8px', padding: '4px 0 8px 0' }}>
+                        <input
+                          className="form-input"
+                          style={{ flex: 1, padding: '4px 8px', fontSize: '12px', height: '28px' }}
+                          placeholder="calc.exe, notepad.exe, or https://google.com..."
+                          value={customLaunchInput}
+                          onChange={e => setCustomLaunchInput(e.target.value)}
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter') {
+                              const val = customLaunchInput.trim();
+                              if (!val) return;
+                              const isUrl = val.startsWith('http://') || val.startsWith('https://') || val.includes('.');
+                              const cmd = isUrl ? `url:${val}` : `run:${val}`;
+                              await signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), cmd);
+                              toast.success(`Sent launch command for: ${val}`);
+                              setCustomLaunchInput('');
+                            }
+                          }}
+                        />
+                        <button
+                          className="btn btn-primary btn-sm"
+                          style={{ height: '28px', padding: '0 12px', fontSize: '12px' }}
+                          onClick={async () => {
+                            const val = customLaunchInput.trim();
+                            if (!val) return;
+                            const isUrl = val.startsWith('http://') || val.startsWith('https://') || val.includes('.');
+                            const cmd = isUrl ? `url:${val}` : `run:${val}`;
+                            await signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), cmd);
+                            toast.success(`Sent launch command for: ${val}`);
+                            setCustomLaunchInput('');
+                          }}
+                        >
+                          Launch
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
             </div>
 
             {/* Video Canvas */}
