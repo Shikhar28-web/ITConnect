@@ -10,6 +10,7 @@ const axios = require('axios/dist/node/axios.cjs');
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 app.commandLine.appendSwitch('ignore-certificate-errors');
 app.commandLine.appendSwitch('disable-features', 'AllowWgcScreenCapturer,AllowWgcWindowCapturer,AllowWgcDesktopCapture,AllowWgcWindowCapture');
+app.commandLine.appendSwitch('disable-dxgi-capturer');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 function loadServerUrl() {
