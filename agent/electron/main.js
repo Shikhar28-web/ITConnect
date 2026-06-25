@@ -79,9 +79,6 @@ app.whenReady().then(async () => {
       if (err) console.warn('Failed to set SoftwareSASGeneration in registry:', err.message);
       else console.log('Successfully enabled SoftwareSASGeneration in registry');
     });
-
-    startSecureDesktopServer();
-    launchSecureDesktopHelper();
   }
   startInputWorker();
   createTray();
@@ -837,6 +834,7 @@ async function connectSignalR() {
     console.log('SignalR connected');
     updateTrayStatus('Connected');
     updateUiStatus(true, 'Online & Ready');
+    startSecureDesktopPolling();
   } catch (err) {
     console.error('SignalR connection failed:', err.message);
     updateTrayStatus('Disconnected');
