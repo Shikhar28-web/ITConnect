@@ -9,8 +9,7 @@ const axios = require('axios/dist/node/axios.cjs');
 // Disable SSL/TLS validation for self-signed certificates in local/LAN environments
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 app.commandLine.appendSwitch('ignore-certificate-errors');
-app.commandLine.appendSwitch('disable-features', 'AllowWgcScreenCapturer,AllowWgcWindowCapturer,AllowWgcDesktopCapture,AllowWgcWindowCapture');
-app.commandLine.appendSwitch('disable-dxgi-capturer');
+app.commandLine.appendSwitch('enable-features', 'AllowWgcScreenCapturer,AllowWgcWindowCapturer,AllowWgcDesktopCapture,AllowWgcWindowCapture');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 function loadServerUrl() {
