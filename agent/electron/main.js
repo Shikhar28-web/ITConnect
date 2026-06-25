@@ -301,12 +301,34 @@ public class Win32Input {
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
-    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+    public static readonly IntPtr HWND_TOPMOST   = new IntPtr(-1);
+    public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+    public static readonly IntPtr HWND_BOTTOM    = new IntPtr( 1);
     public const uint SWP_NOACTIVATE = 0x0010;
     public const uint SWP_SHOWWINDOW = 0x0040;
+    public const uint SWP_NOMOVE     = 0x0002;
+    public const uint SWP_NOSIZE     = 0x0001;
 
+    // Force a specific window to HWND_TOPMOST covering given screen bounds
     public static void PinToTopmost(IntPtr hwnd, int x, int y, int w, int h) {
         SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+
+    // Demote the Windows taskbar so our topmost overlay window covers it
+    public static void SetTrayBehind() {
+        IntPtr tray = FindWindow("Shell_TrayWnd", null);
+        if (tray != IntPtr.Zero)
+            SetWindowPos(tray, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+
+    // Restore the taskbar to its normal (topmost) position
+    public static void RestoreTray() {
+        IntPtr tray = FindWindow("Shell_TrayWnd", null);
+        if (tray != IntPtr.Zero)
+            SetWindowPos(tray, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 }
 "@
@@ -342,6 +364,10 @@ while ($line = [Console]::ReadLine()) {
             # t <hwnd> <x> <y> <w> <h>  -- Force window to HWND_TOPMOST covering full screen
             $hwnd = [IntPtr][long]$parts[1]
             [Win32Input]::PinToTopmost($hwnd, [int]$parts[2], [int]$parts[3], [int]$parts[4], [int]$parts[5])
+        } elseif ($parts[0] -eq 'q') {
+            # q 0 = push taskbar behind our overlay; q 1 = restore taskbar to topmost
+            if ([int]$parts[1] -eq 0) { [Win32Input]::SetTrayBehind() }
+            else                       { [Win32Input]::RestoreTray() }
         }
     } catch {
         # ignore error
@@ -580,11 +606,13 @@ function createBlackoutWindow(progressInfo) {
       y: d.bounds.y,
       width: d.bounds.width,
       height: d.bounds.height,
-      // fullscreen: false keeps the taskbar accessible for admin mouse injection.
-      // We cover it via Win32 SetWindowPos(HWND_TOPMOST) below so the employee cannot see it.
+      // fullscreen: false keeps the taskbar HWND alive so admin can click it.
+      // We demote the taskbar z-order via Win32 (command 'q') so the overlay
+      // sits visually on top of it on the employee's physical screen.
       fullscreen: false,
       alwaysOnTop: true,
       frame: false,
+      hasShadow: false,
       skipTaskbar: true,
       focusable: false,
       transparent: false,
@@ -596,9 +624,9 @@ function createBlackoutWindow(progressInfo) {
       }
     });
 
-    // setIgnoreMouseEvents(true): admin injected clicks pass through to windows underneath.
-    // BlockInput + HideGlobalCursor already block any physical input from the employee.
-    win.setIgnoreMouseEvents(true);
+    // setIgnoreMouseEvents(false): physical employee clicks are swallowed by the
+    // overlay window (nothing happens). Admin clicks pass through via tempAllowClickThrough().
+    win.setIgnoreMouseEvents(false);
     win.setAlwaysOnTop(true, 'screen-saver', 1);
     // Exclude this window from screen capture so admin sees desktop underneath
     win.setContentProtection(true);
@@ -606,36 +634,41 @@ function createBlackoutWindow(progressInfo) {
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
     win.show();
 
-    // Explicitly call SetWindowPos(HWND_TOPMOST) via inputWorker to force the window
-    // above the Windows taskbar on the employee's physical screen.
+    // Force exact pixel-perfect bounds (Electron may otherwise clip to work area)
+    win.setBounds({ x: d.bounds.x, y: d.bounds.y, width: d.bounds.width, height: d.bounds.height });
+
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       const hwnd = getHwndString(win);
-      // ExcludeFromCapture: hides this window from WebRTC capture
+      // Exclude from WebRTC capture
       inputWorker.stdin.write(`e ${hwnd}\n`);
-      // PinToTopmost: covers taskbar on physical screen
+      // Force this window to HWND_TOPMOST with exact screen bounds
       inputWorker.stdin.write(`t ${hwnd} ${d.bounds.x} ${d.bounds.y} ${d.bounds.width} ${d.bounds.height}\n`);
     }
 
     blackoutWindows.push(win);
   }
 
-  // Re-enforce HWND_TOPMOST every 200ms so any newly opened app or taskbar pop-up
-  // cannot appear above the blackout overlay on the employee's physical screen.
+  // Demote the Windows taskbar behind our HWND_TOPMOST overlay so it doesn't peek through
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write('q 0\n');
+  }
+
+  // Re-enforce HWND_TOPMOST + taskbar demotion every 200ms to handle new windows
   if (blackoutAlwaysOnTopInterval) {
     clearInterval(blackoutAlwaysOnTopInterval);
   }
   blackoutAlwaysOnTopInterval = setInterval(() => {
     for (const win of blackoutWindows) {
       if (win && !win.isDestroyed()) {
-        // Re-apply alwaysOnTop (Electron level) — keeps WS_EX_TOPMOST flag active
         win.setAlwaysOnTop(true, 'screen-saver', 1);
-        // Re-apply Win32 HWND_TOPMOST to ensure it covers the taskbar
         if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
           const hwnd = getHwndString(win);
-          const d_bounds = screen.getAllDisplays().find(d => d.bounds.x === win.getBounds().x);
-          if (d_bounds) {
-            inputWorker.stdin.write(`t ${hwnd} ${d_bounds.bounds.x} ${d_bounds.bounds.y} ${d_bounds.bounds.width} ${d_bounds.bounds.height}\n`);
+          const d_match = screen.getAllDisplays().find(d => d.bounds.x === win.getBounds().x);
+          if (d_match) {
+            inputWorker.stdin.write(`t ${hwnd} ${d_match.bounds.x} ${d_match.bounds.y} ${d_match.bounds.width} ${d_match.bounds.height}\n`);
           }
+          // Re-demote taskbar so nothing pops above the overlay
+          inputWorker.stdin.write('q 0\n');
         }
       }
     }
@@ -659,9 +692,11 @@ function destroyBlackoutWindow() {
   }
   blackoutWindows = [];
 
+  // Restore taskbar to its normal topmost position
   if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-    inputWorker.stdin.write("b 0\n");
-    inputWorker.stdin.write("r\n");
+    inputWorker.stdin.write('q 1\n');
+    inputWorker.stdin.write('b 0\n');
+    inputWorker.stdin.write('r\n');
   }
 }
 
@@ -989,16 +1024,19 @@ async function connectSignalR() {
   };
 
   signalRConnection.on('MouseMove', async (x, y) => {
+    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     await injectMouseMove(rx, ry);
   });
 
   signalRConnection.on('MouseClick', async (x, y, button) => {
+    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     await injectMouseClick(rx, ry, button);
   });
 
   signalRConnection.on('MouseDown', async (x, y, button) => {
+    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`d ${rx} ${ry} ${button}\n`);
@@ -1006,6 +1044,7 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('MouseUp', async (x, y, button) => {
+    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`u ${rx} ${ry} ${button}\n`);
@@ -1013,6 +1052,7 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('MouseWheel', async (delta) => {
+    tempAllowClickThrough();
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`w ${delta}\n`);
     }
@@ -1025,15 +1065,16 @@ async function connectSignalR() {
   signalRConnection.on('SetBlackout', (enabled, progressInfo) => {
     if (enabled) {
       createBlackoutWindow(progressInfo);
+      // Only hide cursor — do NOT call BlockInput(true) as it also blocks
+      // the injected mouse_event calls sent by the admin via inputWorker.
       if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write("b 1\n");
-        inputWorker.stdin.write("h\n");
+        inputWorker.stdin.write('h\n'); // HideGlobalCursor
       }
     } else {
       destroyBlackoutWindow();
+      // Restore cursor (BlockInput is NOT set, so no need to clear it)
       if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write("b 0\n");
-        inputWorker.stdin.write("r\n");
+        inputWorker.stdin.write('r\n'); // RestoreGlobalCursor
       }
     }
   });
