@@ -25,7 +25,7 @@ namespace ITComputer.WindowsService.Ipc;
 public sealed class PipeServer : IDisposable
 {
     private const string PipeName       = "ITComputerService";
-    private const int    MaxConnections  = 4;
+    private static readonly int MaxConnections = NamedPipeServerStream.MaxAllowedServerInstances;
     private const int    BufferSize      = 65536;
 
     private readonly ILogger<PipeServer>   _log;
@@ -40,8 +40,8 @@ public sealed class PipeServer : IDisposable
 
     public void Start()
     {
-        // Start N concurrent listener tasks so the pipe can handle simultaneous connects
-        for (int i = 0; i < MaxConnections; i++)
+        // Start 4 concurrent listener tasks so the pipe can handle simultaneous connects
+        for (int i = 0; i < 4; i++)
             _listeners.Add(ListenLoopAsync());
     }
 
