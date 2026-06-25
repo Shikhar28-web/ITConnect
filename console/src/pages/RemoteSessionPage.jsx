@@ -735,7 +735,7 @@ function RemoteSessionPage() {
                 </button>
 
                 {showToolsDropdown && (
-                  <div className="tools-dropdown-menu">
+                  <div className="tools-dropdown-menu" style={{ right: 0, left: 'auto' }}>
                     <div className="tools-dropdown-section">
                       <div className="tools-dropdown-section-title">💻 Administrative Tools</div>
                       <div className="tools-grid">
@@ -806,42 +806,42 @@ function RemoteSessionPage() {
                           toast.info('Toggling Workspace Lock overlay...');
                         }}>
                           <span className="tools-item-icon">🔒</span>
-                          <span className="tools-item-text">Workspace Lock (Overlay)</span>
+                          <span className="tools-item-text">Workspace Lock</span>
                         </button>
                         <button className="tools-item-btn danger" onClick={() => {
                           signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'wslock');
                           toast.info('Locking Windows workstation...');
                         }}>
                           <span className="tools-item-icon">🖥️</span>
-                          <span className="tools-item-text">Lock Windows (Native)</span>
+                          <span className="tools-item-text">Lock PC (Native)</span>
                         </button>
                         <button className="tools-item-btn danger" onClick={() => {
                           signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'logoff');
                           toast.warning('Signing out remote user...');
                         }}>
                           <span className="tools-item-icon">👤</span>
-                          <span className="tools-item-text">Sign Out / Log Off</span>
+                          <span className="tools-item-text">Sign Out</span>
                         </button>
                         <button className="tools-item-btn danger" onClick={() => {
                           signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'restart');
                           toast.warning('Restarting remote host...');
                         }}>
                           <span className="tools-item-icon">🔄</span>
-                          <span className="tools-item-text">Restart Computer</span>
+                          <span className="tools-item-text">Restart PC</span>
                         </button>
                         <button className="tools-item-btn danger" onClick={() => {
                           signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'shutdown');
                           toast.warning('Shutting down remote host...');
                         }}>
                           <span className="tools-item-icon">⏻</span>
-                          <span className="tools-item-text">Shutdown Computer</span>
+                          <span className="tools-item-text">Shut Down PC</span>
                         </button>
                         <button className="tools-item-btn danger" onClick={() => {
                           signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'safemode');
                           toast.warning('Rebooting to Safe Mode...');
                         }}>
                           <span className="tools-item-icon">🛡️</span>
-                          <span className="tools-item-text">Boot to Safe Mode</span>
+                          <span className="tools-item-text">Safe Mode</span>
                         </button>
                       </div>
                     </div>

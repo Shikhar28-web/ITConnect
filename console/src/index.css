@@ -1034,8 +1034,9 @@ body {
   position: absolute;
   top: 100%;
   right: 0;
+  left: auto;
   margin-top: 8px;
-  width: 320px;
+  width: 340px;
   background: rgba(17, 24, 39, 0.95);
   backdrop-filter: blur(12px);
   border: 1px solid var(--border);
