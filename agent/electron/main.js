@@ -297,6 +297,17 @@ public class Win32Input {
     public static void ExcludeFromCapture(IntPtr hwnd) {
         SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
     }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    public const uint SWP_NOACTIVATE = 0x0010;
+    public const uint SWP_SHOWWINDOW = 0x0040;
+
+    public static void PinToTopmost(IntPtr hwnd, int x, int y, int w, int h) {
+        SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
 }
 "@
 Add-Type -AssemblyName System.Windows.Forms
@@ -327,6 +338,10 @@ while ($line = [Console]::ReadLine()) {
         } elseif ($parts[0] -eq 'e') {
             $hwnd = [IntPtr][long]$parts[1]
             [Win32Input]::ExcludeFromCapture($hwnd)
+        } elseif ($parts[0] -eq 't') {
+            # t <hwnd> <x> <y> <w> <h>  -- Force window to HWND_TOPMOST covering full screen
+            $hwnd = [IntPtr][long]$parts[1]
+            [Win32Input]::PinToTopmost($hwnd, [int]$parts[2], [int]$parts[3], [int]$parts[4], [int]$parts[5])
         }
     } catch {
         # ignore error
@@ -565,10 +580,9 @@ function createBlackoutWindow(progressInfo) {
       y: d.bounds.y,
       width: d.bounds.width,
       height: d.bounds.height,
-      // fullscreen: true ensures the window covers the Windows taskbar on the physical monitor.
-      // setContentProtection(true) below makes this window invisible to WebRTC capture,
-      // so the admin still sees the desktop underneath — only the employee's physical screen is blacked out.
-      fullscreen: true,
+      // fullscreen: false keeps the taskbar accessible for admin mouse injection.
+      // We cover it via Win32 SetWindowPos(HWND_TOPMOST) below so the employee cannot see it.
+      fullscreen: false,
       alwaysOnTop: true,
       frame: false,
       skipTaskbar: true,
@@ -582,8 +596,8 @@ function createBlackoutWindow(progressInfo) {
       }
     });
 
-    // setIgnoreMouseEvents(true) so Electron doesn't intercept admin's injected input;
-    // local employee input is already blocked at OS level via BlockInput + HideGlobalCursor.
+    // setIgnoreMouseEvents(true): admin injected clicks pass through to windows underneath.
+    // BlockInput + HideGlobalCursor already block any physical input from the employee.
     win.setIgnoreMouseEvents(true);
     win.setAlwaysOnTop(true, 'screen-saver', 1);
     // Exclude this window from screen capture so admin sees desktop underneath
@@ -592,24 +606,37 @@ function createBlackoutWindow(progressInfo) {
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
     win.show();
 
-    // Force it above the taskbar shell using Win32 HWND
+    // Explicitly call SetWindowPos(HWND_TOPMOST) via inputWorker to force the window
+    // above the Windows taskbar on the employee's physical screen.
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       const hwnd = getHwndString(win);
+      // ExcludeFromCapture: hides this window from WebRTC capture
       inputWorker.stdin.write(`e ${hwnd}\n`);
+      // PinToTopmost: covers taskbar on physical screen
+      inputWorker.stdin.write(`t ${hwnd} ${d.bounds.x} ${d.bounds.y} ${d.bounds.width} ${d.bounds.height}\n`);
     }
 
     blackoutWindows.push(win);
   }
 
-  // Periodic z-order enforcement to ensure it covers taskbar & new windows
+  // Re-enforce HWND_TOPMOST every 200ms so any newly opened app or taskbar pop-up
+  // cannot appear above the blackout overlay on the employee's physical screen.
   if (blackoutAlwaysOnTopInterval) {
     clearInterval(blackoutAlwaysOnTopInterval);
   }
   blackoutAlwaysOnTopInterval = setInterval(() => {
     for (const win of blackoutWindows) {
       if (win && !win.isDestroyed()) {
+        // Re-apply alwaysOnTop (Electron level) — keeps WS_EX_TOPMOST flag active
         win.setAlwaysOnTop(true, 'screen-saver', 1);
-        win.moveTop();
+        // Re-apply Win32 HWND_TOPMOST to ensure it covers the taskbar
+        if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+          const hwnd = getHwndString(win);
+          const d_bounds = screen.getAllDisplays().find(d => d.bounds.x === win.getBounds().x);
+          if (d_bounds) {
+            inputWorker.stdin.write(`t ${hwnd} ${d_bounds.bounds.x} ${d_bounds.bounds.y} ${d_bounds.bounds.width} ${d_bounds.bounds.height}\n`);
+          }
+        }
       }
     }
   }, 200);
