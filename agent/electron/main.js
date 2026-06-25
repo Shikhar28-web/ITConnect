@@ -36,6 +36,8 @@ console.log('Connecting to server:', SERVER_URL);
 let tray = null;
 let mainWindow = null;
 let blackoutWindows = [];
+let blackoutAlwaysOnTopInterval = null;
+let blackoutIgnoreTimeout = null;
 let lockWindows = [];
 let lockActive = false;
 let privacyModeActive = false;
@@ -456,6 +458,27 @@ function getHwndString(win) {
   return buf.readInt32LE(0).toString();
 }
 
+// Helper functions for blackout mouse event control (allowing admin input to bypass the overlay)
+function setBlackoutIgnoreMouse(ignore) {
+  if (blackoutIgnoreTimeout) {
+    clearTimeout(blackoutIgnoreTimeout);
+    blackoutIgnoreTimeout = null;
+  }
+  for (const win of blackoutWindows) {
+    if (win && !win.isDestroyed()) {
+      win.setIgnoreMouseEvents(ignore);
+    }
+  }
+}
+
+function tempAllowClickThrough() {
+  if (blackoutWindows.length === 0) return;
+  setBlackoutIgnoreMouse(true);
+  blackoutIgnoreTimeout = setTimeout(() => {
+    setBlackoutIgnoreMouse(false);
+  }, 300);
+}
+
 // ─── Blackout Overlay Window ──────────────────────────────────────────────────
 function createBlackoutWindow(progressInfo) {
   destroyBlackoutWindow(); // Ensure previous ones are cleaned up
@@ -464,6 +487,8 @@ function createBlackoutWindow(progressInfo) {
     <!DOCTYPE html>
     <html>
     <head>
+      <meta charset="UTF-8">
+      <title>Screen Blacked Out</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; cursor: none !important; }
         body {
@@ -504,7 +529,20 @@ function createBlackoutWindow(progressInfo) {
         .ticket { margin-top: 20px; font-size: 14px; color: #4A9EFF; }
       </style>
     </head>
-   
+    <body>
+      <div class="logo">🖥️</div>
+      <div class="company">ITConnect Support</div>
+      <div class="title">Remote Maintenance in Progress</div>
+      <div class="message">
+        Your administrator has temporarily blacked out this screen to perform secure operations.
+        Please stand by while maintenance is completed.
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill"></div>
+      </div>
+      <div class="info">Do not power off or disconnect your computer.</div>
+      ${progressInfo ? `<div class="ticket">${progressInfo}</div>` : ''}
+    </body>
     </html>
   `;
 
@@ -529,8 +567,8 @@ function createBlackoutWindow(progressInfo) {
       }
     });
 
-    win.setIgnoreMouseEvents(true);
-    win.setAlwaysOnTop(true, 'screen-saver');
+    win.setIgnoreMouseEvents(false); // Swallow local clicks by default
+    win.setAlwaysOnTop(true, 'screen-saver', 1);
     win.setContentProtection(true);
     
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
@@ -543,9 +581,31 @@ function createBlackoutWindow(progressInfo) {
 
     blackoutWindows.push(win);
   }
+
+  // Periodic z-order enforcement to ensure it covers taskbar & new windows
+  if (blackoutAlwaysOnTopInterval) {
+    clearInterval(blackoutAlwaysOnTopInterval);
+  }
+  blackoutAlwaysOnTopInterval = setInterval(() => {
+    for (const win of blackoutWindows) {
+      if (win && !win.isDestroyed()) {
+        win.setAlwaysOnTop(true, 'screen-saver', 1);
+        win.moveTop();
+      }
+    }
+  }, 200);
 }
 
 function destroyBlackoutWindow() {
+  if (blackoutAlwaysOnTopInterval) {
+    clearInterval(blackoutAlwaysOnTopInterval);
+    blackoutAlwaysOnTopInterval = null;
+  }
+  if (blackoutIgnoreTimeout) {
+    clearTimeout(blackoutIgnoreTimeout);
+    blackoutIgnoreTimeout = null;
+  }
+
   for (const win of blackoutWindows) {
     if (win && !win.isDestroyed()) {
       win.close();
@@ -883,16 +943,19 @@ async function connectSignalR() {
   };
 
   signalRConnection.on('MouseMove', async (x, y) => {
+    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     await injectMouseMove(rx, ry);
   });
 
   signalRConnection.on('MouseClick', async (x, y, button) => {
+    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     await injectMouseClick(rx, ry, button);
   });
 
   signalRConnection.on('MouseDown', async (x, y, button) => {
+    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`d ${rx} ${ry} ${button}\n`);
@@ -900,6 +963,7 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('MouseUp', async (x, y, button) => {
+    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`u ${rx} ${ry} ${button}\n`);
@@ -907,6 +971,7 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('MouseWheel', async (delta) => {
+    tempAllowClickThrough();
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`w ${delta}\n`);
     }
