@@ -178,276 +178,99 @@ function createMainWindow() {
   });
 }
 
-// ─── Input Worker (Persistent PowerShell Session) ──────────────────────────────
+// ─── Input Worker (Native C# Helper — replaces PowerShell) ─────────────────────
+// Spawns ITComputer.InputHelper.exe which uses SendInput (not deprecated
+// mouse_event/keybd_event) and creates native Win32 blackout windows.
 function startInputWorker() {
   if (process.platform !== 'win32') return;
 
-  const initScript = `
-Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
+  // In dev: look next to this script. In prod: next to the packaged app.
+  const helperName = 'ITComputer.InputHelper.exe';
+  const helperPath = isDev
+    ? path.join(__dirname, '../../native/ITComputer.InputHelper/bin/Release/net10.0-windows/win-x64/publish', helperName)
+    : path.join(process.resourcesPath, helperName);
 
-public class Win32Input {
-    [DllImport("user32.dll")]
-    public static extern bool SetCursorPos(int x, int y);
+  if (!fs.existsSync(helperPath)) {
+    console.warn('[InputWorker] Helper not found at:', helperPath);
+    console.warn('[InputWorker] Build it with: dotnet publish -c Release in agent/native/ITComputer.InputHelper');
+    return;
+  }
 
-    [DllImport("user32.dll")]
-    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, uint dwExtraInfo);
+  console.log('[InputWorker] Spawning native helper:', helperPath);
+  inputWorker = spawn(helperPath, [], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true
+  });
 
-    [DllImport("user32.dll")]
-    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, uint dwExtraInfo);
-
-    [DllImport("user32.dll")]
-    public static extern bool BlockInput(bool fBlockIt);
-
-    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
-    public const uint MOUSEEVENTF_LEFTUP = 0x0004;
-    public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
-    public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
-    public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
-    public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
-    public const uint MOUSEEVENTF_WHEEL = 0x0800;
-
-    public static void Move(int x, int y) {
-        SetCursorPos(x, y);
-    }
-
-    public static void Click(int x, int y, int button) {
-        SetCursorPos(x, y);
-        uint down = MOUSEEVENTF_LEFTDOWN;
-        uint up = MOUSEEVENTF_LEFTUP;
-        if (button == 2) {
-            down = MOUSEEVENTF_RIGHTDOWN;
-            up = MOUSEEVENTF_RIGHTUP;
-        } else if (button == 1) {
-            down = MOUSEEVENTF_MIDDLEDOWN;
-            up = MOUSEEVENTF_MIDDLEUP;
-        }
-        mouse_event(down, 0, 0, 0, 0);
-        System.Threading.Thread.Sleep(15);
-        mouse_event(up, 0, 0, 0, 0);
-    }
-
-    public static void MouseDown(int x, int y, int button) {
-        SetCursorPos(x, y);
-        uint flag = MOUSEEVENTF_LEFTDOWN;
-        if (button == 2) flag = MOUSEEVENTF_RIGHTDOWN;
-        else if (button == 1) flag = MOUSEEVENTF_MIDDLEDOWN;
-        mouse_event(flag, 0, 0, 0, 0);
-    }
-
-    public static void MouseUp(int x, int y, int button) {
-        SetCursorPos(x, y);
-        uint flag = MOUSEEVENTF_LEFTUP;
-        if (button == 2) flag = MOUSEEVENTF_RIGHTUP;
-        else if (button == 1) flag = MOUSEEVENTF_MIDDLEUP;
-        mouse_event(flag, 0, 0, 0, 0);
-    }
-
-    public static void MouseWheel(int delta) {
-        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)delta, 0);
-    }
-
-    [DllImport("user32.dll")]
-    public static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
-
-    [DllImport("user32.dll")]
-    public static extern bool SetSystemCursor(IntPtr hcur, uint id);
-
-    [DllImport("user32.dll")]
-    public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
-
-    [DllImport("user32.dll")]
-    public static extern int GetSystemMetrics(int nIndex);
-
-    [DllImport("user32.dll")]
-    public static extern uint SetWindowDisplayAffinity(IntPtr hwnd, uint dwAffinity);
-
-    public const uint SPI_SETCURSORS = 0x0057;
-    public const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
-
-    public static readonly uint[] CursorIds = { 32512, 32513, 32514, 32515, 32516, 32642, 32643, 32644, 32645, 32646, 32648, 32649, 32650, 32651 };
-
-    public static void HideGlobalCursor() {
-        int cx = GetSystemMetrics(13); // SM_CXCURSOR
-        int cy = GetSystemMetrics(14); // SM_CYCURSOR
-        if (cx <= 0) cx = 32;
-        if (cy <= 0) cy = 32;
-
-        int widthInBytes = ((cx + 15) / 16) * 2;
-        int numBytes = widthInBytes * cy;
-
-        byte[] andPlane = new byte[numBytes];
-        for (int i = 0; i < numBytes; i++) andPlane[i] = 0xFF;
-        byte[] xorPlane = new byte[numBytes];
-        for (int i = 0; i < numBytes; i++) xorPlane[i] = 0x00;
-        
-        foreach (uint id in CursorIds) {
-            IntPtr blank = CreateCursor(IntPtr.Zero, 0, 0, cx, cy, andPlane, xorPlane);
-            if (blank != IntPtr.Zero) {
-                SetSystemCursor(blank, id);
-            }
-        }
-    }
-
-    public static void RestoreGlobalCursor() {
-        SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
-    }
-
-    public static void ExcludeFromCapture(IntPtr hwnd) {
-        SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
-    }
-}
-"@
-Add-Type -AssemblyName System.Windows.Forms
-
-while ($line = [Console]::ReadLine()) {
-    try {
-        $line = $line.Replace("\`r", "")
-        $parts = $line.Split(' ')
-        if ($parts[0] -eq 'm') {
-            [Win32Input]::Move([int]$parts[1], [int]$parts[2])
-        } elseif ($parts[0] -eq 'c') {
-            [Win32Input]::Click([int]$parts[1], [int]$parts[2], [int]$parts[3])
-        } elseif ($parts[0] -eq 'd') {
-            [Win32Input]::MouseDown([int]$parts[1], [int]$parts[2], [int]$parts[3])
-        } elseif ($parts[0] -eq 'u') {
-            [Win32Input]::MouseUp([int]$parts[1], [int]$parts[2], [int]$parts[3])
-        } elseif ($parts[0] -eq 'w') {
-            [Win32Input]::MouseWheel([int]$parts[1])
-        } elseif ($parts[0] -eq 'b') {
-            [Win32Input]::BlockInput([int]$parts[1] -eq 1)
-        } elseif ($parts[0] -eq 'h') {
-            [Win32Input]::HideGlobalCursor()
-        } elseif ($parts[0] -eq 'r') {
-            [Win32Input]::RestoreGlobalCursor()
-        } elseif ($parts[0] -eq 'k') {
-            $keyStr = $line.Substring(2)
-            [System.Windows.Forms.SendKeys]::SendWait($keyStr)
-        } elseif ($parts[0] -eq 'e') {
-            $hwnd = [IntPtr][long]$parts[1]
-            [Win32Input]::ExcludeFromCapture($hwnd)
-        }
-    } catch {
-        # ignore error
-    }
-}
-[Win32Input]::RestoreGlobalCursor()
-`;
-
-  inputWorker = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', '-']);
-  inputWorker.stdin.write(initScript + '\n');
+  inputWorker.stderr.on('data', (data) => {
+    console.warn('[InputHelper]', data.toString().trim());
+  });
 
   inputWorker.on('error', (err) => {
-    console.error('Input worker error:', err);
+    console.error('[InputWorker] Spawn error:', err);
   });
 
   inputWorker.on('close', (code) => {
-    console.log(`Input worker exited with code ${code}`);
+    console.log(`[InputWorker] Exited with code ${code}`);
     inputWorker = null;
     if (!app.isQuitting) {
-      console.log('Input worker exited unexpectedly. Restarting in 3 seconds...');
+      console.log('[InputWorker] Restarting in 3 seconds...');
       setTimeout(startInputWorker, 3000);
     }
   });
 }
 
-function startSecureDesktopServer() {
-  const net = require('net');
-  secureDesktopServer = net.createServer((socket) => {
-    console.log('Secure desktop helper connected via TCP');
-    secureDesktopSocket = socket;
+// ─── Windows Service Named Pipe Client ───────────────────────────────────────
+// Communicates with ITComputerService.exe (LocalSystem Windows Service) for
+// privileged operations: CAD, secure desktop name/capture.
+const PIPE_NAME = '\\\\.\\pipe\\ITComputerService';
 
-    socket.setEncoding('utf8');
-
-    let buffer = '';
-    socket.on('data', (data) => {
-      buffer += data;
-      let lines = buffer.split('\n');
-      buffer = lines.pop(); // Keep last incomplete line
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('desktop:')) {
-          const desktopName = trimmed.substring(8);
-          if (signalRConnection && signalRConnection.state === 'Connected' && currentEngineerConnId) {
-            signalRConnection.invoke('SendActiveDesktop', currentEngineerConnId, desktopName).catch(err => {
-              console.error('Failed to send active desktop:', err.message);
-            });
-          }
-        } else if (trimmed.startsWith('frame:')) {
-          const base64Frame = trimmed.substring(6);
-          if (signalRConnection && signalRConnection.state === 'Connected' && currentEngineerConnId) {
-            signalRConnection.invoke('SendSecureDesktopFrame', currentEngineerConnId, base64Frame).catch(err => {
-              console.error('Failed to send secure desktop frame:', err.message);
-            });
-          }
-        }
-      }
+async function sendServiceCommand(command) {
+  return new Promise((resolve) => {
+    const net = require('net');
+    const client = net.createConnection(PIPE_NAME, () => {
+      client.write(command + '\n');
     });
 
-    socket.on('close', () => {
-      console.log('Secure desktop helper socket closed');
-      secureDesktopSocket = null;
+    let response = '';
+    client.on('data', (data) => { response += data.toString(); });
+    client.on('end', () => resolve(response.trim()));
+    client.on('error', (err) => {
+      console.warn('[ServicePipe] Error:', err.message);
+      resolve(null);
     });
 
-    socket.on('error', (err) => {
-      console.error('Secure desktop socket error:', err.message);
-    });
-  });
-
-  secureDesktopServer.listen(59300, '127.0.0.1', () => {
-    console.log('Secure desktop TCP server listening on port 59300');
+    // Timeout after 5 seconds
+    setTimeout(() => { try { client.destroy(); } catch (_) {} resolve(null); }, 5000);
   });
 }
 
-function launchSecureDesktopHelper() {
-  if (secureDesktopHelperProcess) return;
+async function startSecureDesktopPolling() {
+  if (process.platform !== 'win32') return;
 
-  const helperScriptPath = path.join(__dirname, 'secure_desktop_helper.ps1');
-  const port = 59300;
+  setInterval(async () => {
+    if (!signalRConnection || signalRConnection.state !== 'Connected' || !currentEngineerConnId) return;
 
-  console.log('Launching secure desktop helper as child process in active session...');
-  secureDesktopHelperProcess = spawn('powershell', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-ExecutionPolicy', 'Bypass',
-    '-File', helperScriptPath,
-    '-Port', port.toString()
-  ]);
+    const desktopName = await sendServiceCommand('DESKTOP_NAME');
+    if (!desktopName) return;
 
-  secureDesktopHelperProcess.on('error', (spawnErr) => {
-    console.error('Failed to spawn helper child process:', spawnErr);
-    secureDesktopHelperProcess = null;
-  });
+    await signalRConnection.invoke('SendActiveDesktop', currentEngineerConnId, desktopName).catch(() => {});
 
-  secureDesktopHelperProcess.on('close', (code) => {
-    console.log(`Secure desktop helper child process exited with code ${code}`);
-    secureDesktopHelperProcess = null;
-    if (!app.isQuitting) {
-      console.log('Secure desktop helper child process exited. Restarting in 5 seconds...');
-      setTimeout(launchSecureDesktopHelper, 5000);
+    // If on a secure desktop, capture and send the frame
+    const isSecure = desktopName !== 'Default' && desktopName !== 'Unknown' && desktopName !== null;
+    if (isSecure) {
+      const frame = await sendServiceCommand('CAPTURE_SECURE');
+      if (frame && frame !== 'NONE') {
+        await signalRConnection.invoke('SendSecureDesktopFrame', currentEngineerConnId, frame).catch(() => {});
+      }
     }
-  });
+  }, 100); // Poll every 100ms for responsive desktop switch detection
 }
 
 function stopSecureDesktopHelper() {
-  console.log('Stopping secure desktop helper...');
-  if (secureDesktopHelperProcess) {
-    secureDesktopHelperProcess.kill();
-    secureDesktopHelperProcess = null;
-  }
-
-  if (secureDesktopSocket) {
-    secureDesktopSocket.destroy();
-    secureDesktopSocket = null;
-  }
-
-  if (secureDesktopServer) {
-    secureDesktopServer.close();
-    secureDesktopServer = null;
-  }
+  // No-op: secure desktop is now handled by the Windows Service (no child process)
 }
+
 
 // Helper to get HWND as a safe string (handles 64-bit and 32-bit platforms)
 function getHwndString(win) {
@@ -458,186 +281,25 @@ function getHwndString(win) {
   return buf.readInt32LE(0).toString();
 }
 
-// Helper functions for blackout mouse event control (allowing admin input to bypass the overlay)
-function setBlackoutIgnoreMouse(ignore) {
-  if (blackoutIgnoreTimeout) {
-    clearTimeout(blackoutIgnoreTimeout);
-    blackoutIgnoreTimeout = null;
+// Blackout is handled entirely by the native InputHelper (command 'B 1/0').
+// createBlackoutWindow / destroyBlackoutWindow kept as thin wrappers so
+// the rest of the codebase doesn't need to change.
+function createBlackoutWindow() {
+  if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+    inputWorker.stdin.write('B 1\n'); // Show native Win32 blackout overlay
+    inputWorker.stdin.write('h\n');   // Hide global cursor
+    inputWorker.stdin.write('b 1\n'); // BlockInput — same thread as SendInput, so admin injection still works
   }
-  for (const win of blackoutWindows) {
-    if (win && !win.isDestroyed()) {
-      win.setIgnoreMouseEvents(ignore);
-    }
-  }
-}
-
-function tempAllowClickThrough() {
-  if (blackoutWindows.length === 0) return;
-  setBlackoutIgnoreMouse(true);
-  blackoutIgnoreTimeout = setTimeout(() => {
-    setBlackoutIgnoreMouse(false);
-  }, 300);
-}
-
-// ─── Blackout Overlay Window ──────────────────────────────────────────────────
-function createBlackoutWindow(progressInfo) {
-  destroyBlackoutWindow(); // Ensure previous ones are cleaned up
-
-  const blackoutHtml = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <title>Screen Blacked Out</title>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body {
-          width: 100%; height: 100%;
-          background: #000;
-          overflow: hidden;
-          cursor: none !important;
-          user-select: none;
-        }
-        #word {
-          position: absolute;
-          font-family: 'Segoe UI', Arial, sans-serif;
-          font-size: 48px;
-          font-weight: 700;
-          color: #fff;
-          white-space: nowrap;
-          pointer-events: none;
-          cursor: none !important;
-        }
-      </style>
-    </head>
-    <body>
-      <div id="word">Windows</div>
-      <script>
-        const el = document.getElementById('word');
-        const colors = ['#ffffff', '#4A9EFF', '#7B61FF', '#00e5ff', '#ff6ec7', '#a3ff6e'];
-        let x = 80, y = 80;
-        let vx = 1.2, vy = 0.9;
-        let ci = 0;
-
-        function step() {
-          const W = window.innerWidth;
-          const H = window.innerHeight;
-          const ew = el.offsetWidth;
-          const eh = el.offsetHeight;
-
-          x += vx;
-          y += vy;
-
-          let bounced = false;
-          if (x + ew >= W) { x = W - ew; vx = -Math.abs(vx); bounced = true; }
-          if (x <= 0)       { x = 0;       vx =  Math.abs(vx); bounced = true; }
-          if (y + eh >= H)  { y = H - eh;  vy = -Math.abs(vy); bounced = true; }
-          if (y <= 0)       { y = 0;       vy =  Math.abs(vy); bounced = true; }
-
-          if (bounced) {
-            ci = (ci + 1) % colors.length;
-            el.style.color = colors[ci];
-          }
-
-          el.style.left = x + 'px';
-          el.style.top  = y + 'px';
-          requestAnimationFrame(step);
-        }
-
-        window.addEventListener('load', () => {
-          el.style.left = x + 'px';
-          el.style.top  = y + 'px';
-          requestAnimationFrame(step);
-        });
-
-        // Block any key events on this overlay
-        window.addEventListener('keydown', e => e.preventDefault(), true);
-        window.addEventListener('mousedown', e => e.preventDefault(), true);
-      </script>
-    </body>
-    </html>
-  `;
-
-  const displays = screen.getAllDisplays();
-  for (const d of displays) {
-    const { bounds } = d;
-
-    const win = new BrowserWindow({
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width,
-      height: bounds.height,
-      // fullscreen: true ensures the window covers the Windows taskbar on the physical monitor.
-      // setContentProtection(true) below makes this window invisible to WebRTC capture,
-      // so the admin still sees the desktop underneath — only the employee's physical screen is blacked out.
-      fullscreen: false,
-      alwaysOnTop: true,
-      frame: false,
-      skipTaskbar: true,
-      focusable: false,
-      transparent: false,
-      backgroundColor: '#000000',
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-        preload: path.join(__dirname, 'preload.js')
-      }
-    });
-
-    // setIgnoreMouseEvents(true) so Electron doesn't intercept admin's injected input;
-    // local employee input is already blocked at OS level via BlockInput + HideGlobalCursor.
-    win.setIgnoreMouseEvents(true);
-    win.setAlwaysOnTop(true, 'screen-saver');    // Exclude this window from screen capture so admin sees desktop underneath
-    win.setContentProtection(true);
-
-    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
-    win.show();
-
-    // Force it above the taskbar shell using Win32 HWND
-    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-      const hwnd = getHwndString(win);
-      inputWorker.stdin.write(`e ${hwnd}\n`);
-    }
-
-    blackoutWindows.push(win);
-  }
-
-  // Periodic z-order enforcement to ensure it covers taskbar & new windows
-  if (blackoutAlwaysOnTopInterval) {
-    clearInterval(blackoutAlwaysOnTopInterval);
-  }
-  blackoutAlwaysOnTopInterval = setInterval(() => {
-    for (const win of blackoutWindows) {
-      if (win && !win.isDestroyed()) {
-        win.setAlwaysOnTop(true, 'screen-saver', 1);
-        // win.moveTop();
-      }
-    }
-  }, 200);
 }
 
 function destroyBlackoutWindow() {
-  if (blackoutAlwaysOnTopInterval) {
-    clearInterval(blackoutAlwaysOnTopInterval);
-    blackoutAlwaysOnTopInterval = null;
-  }
-  if (blackoutIgnoreTimeout) {
-    clearTimeout(blackoutIgnoreTimeout);
-    blackoutIgnoreTimeout = null;
-  }
-
-  for (const win of blackoutWindows) {
-    if (win && !win.isDestroyed()) {
-      win.close();
-    }
-  }
-  blackoutWindows = [];
-
   if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-    inputWorker.stdin.write("b 0\n");
-    inputWorker.stdin.write("r\n");
+    inputWorker.stdin.write('B 0\n'); // Hide native Win32 blackout overlay (also restores taskbar z-order)
+    inputWorker.stdin.write('b 0\n'); // Unblock input
+    inputWorker.stdin.write('r\n');   // Restore global cursor
   }
 }
+
 
 // ─── Custom Lock Overlay Window ───────────────────────────────────────────────
 let isClosingProgrammatically = false;
@@ -956,11 +618,20 @@ async function connectSignalR() {
     mainWindow?.webContents.send('webrtc-ice', candidate);
   });
 
+  // ── Multi-monitor coordinate mapping ────────────────────────────────────
+  // Normalized coords from admin console: x and y in range 0-10000
+  // Maps to physical pixels accounting for all monitors in virtual screen.
   const getScaledCoords = (x, y) => {
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const { width, height } = primaryDisplay.bounds;
-    const rx = Math.round((x / 10000) * (width - 1));
-    const ry = Math.round((y / 10000) * (height - 1));
+    const displays = screen.getAllDisplays();
+    // Virtual screen bounding box
+    const minX = Math.min(...displays.map(d => d.bounds.x));
+    const minY = Math.min(...displays.map(d => d.bounds.y));
+    const maxX = Math.max(...displays.map(d => d.bounds.x + d.bounds.width));
+    const maxY = Math.max(...displays.map(d => d.bounds.y + d.bounds.height));
+    const totalW = maxX - minX;
+    const totalH = maxY - minY;
+    const rx = Math.round(minX + (x / 10000) * totalW);
+    const ry = Math.round(minY + (y / 10000) * totalH);
     return { rx, ry };
   };
 
@@ -995,22 +666,21 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('KeyEvent', async (key, isDown, ctrl, alt, shift) => {
-    await injectKeyEvent(key, isDown, ctrl, alt, shift);
+    // Use new InputHelper protocol: k <key> <isDown> <ctrl> <alt> <shift>
+    if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+      const d = isDown ? 1 : 0;
+      const c = ctrl  ? 1 : 0;
+      const a = alt   ? 1 : 0;
+      const s = shift ? 1 : 0;
+      inputWorker.stdin.write(`k ${key} ${d} ${c} ${a} ${s}\n`);
+    }
   });
 
   signalRConnection.on('SetBlackout', (enabled, progressInfo) => {
     if (enabled) {
-      createBlackoutWindow(progressInfo);
-      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write("b 1\n");
-        inputWorker.stdin.write("h\n");
-      }
+      createBlackoutWindow();  // delegates entirely to InputHelper native Win32 overlay
     } else {
       destroyBlackoutWindow();
-      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write("b 0\n");
-        inputWorker.stdin.write("r\n");
-      }
     }
   });
 
@@ -1038,40 +708,33 @@ async function connectSignalR() {
     await executePowerCommand(command);
   });
 
-  signalRConnection.on('SecureDesktopInput', (inputJson) => {
+  signalRConnection.on('SecureDesktopInput', async (inputJson) => {
+    // Forward secure desktop input via the InputHelper (same SendInput path).
+    // The Windows Service ensures the correct desktop context for injection.
     try {
       const input = JSON.parse(inputJson);
-      if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
-        if (input.type === 'move') {
-          const { rx, ry } = getScaledCoords(input.x, input.y);
-          secureDesktopSocket.write(`m ${rx} ${ry}\n`);
-        } else if (input.type === 'click') {
-          const { rx, ry } = getScaledCoords(input.x, input.y);
-          secureDesktopSocket.write(`c ${rx} ${ry} ${input.button}\n`);
-        } else if (input.type === 'mousedown') {
-          const { rx, ry } = getScaledCoords(input.x, input.y);
-          secureDesktopSocket.write(`d ${rx} ${ry} ${input.button}\n`);
-        } else if (input.type === 'mouseup') {
-          const { rx, ry } = getScaledCoords(input.x, input.y);
-          secureDesktopSocket.write(`u ${rx} ${ry} ${input.button}\n`);
-        } else if (input.type === 'wheel') {
-          secureDesktopSocket.write(`w ${input.delta}\n`);
-        } else if (input.type === 'key') {
-          if (['control', 'shift', 'alt', 'meta'].includes(input.key.toLowerCase())) {
-            return;
-          }
-          let combo = '';
-          if (input.ctrl) combo += '^';
-          if (input.alt) combo += '%';
-          if (input.shift) combo += '+';
-          const mapped = mapKeyToSendKeys(input.key);
-          if (mapped.length === 1 && ['+', '^', '%', '~', '{', '}', '[', ']'].includes(mapped)) {
-            combo += `{${mapped}}`;
-          } else {
-            combo += mapped;
-          }
-          secureDesktopSocket.write(`k ${combo}\n`);
-        }
+      if (!inputWorker || inputWorker.killed) return;
+
+      if (input.type === 'move') {
+        const { rx, ry } = getScaledCoords(input.x, input.y);
+        inputWorker.stdin.write(`m ${rx} ${ry}\n`);
+      } else if (input.type === 'click') {
+        const { rx, ry } = getScaledCoords(input.x, input.y);
+        inputWorker.stdin.write(`c ${rx} ${ry} ${input.button}\n`);
+      } else if (input.type === 'mousedown') {
+        const { rx, ry } = getScaledCoords(input.x, input.y);
+        inputWorker.stdin.write(`d ${rx} ${ry} ${input.button}\n`);
+      } else if (input.type === 'mouseup') {
+        const { rx, ry } = getScaledCoords(input.x, input.y);
+        inputWorker.stdin.write(`u ${rx} ${ry} ${input.button}\n`);
+      } else if (input.type === 'wheel') {
+        inputWorker.stdin.write(`w ${input.delta}\n`);
+      } else if (input.type === 'key') {
+        const d = input.isDown ? 1 : 0;
+        const c = input.ctrl  ? 1 : 0;
+        const a = input.alt   ? 1 : 0;
+        const s = input.shift ? 1 : 0;
+        inputWorker.stdin.write(`k ${input.key} ${d} ${c} ${a} ${s}\n`);
       }
     } catch (e) {
       console.error('Error handling SecureDesktopInput:', e.message);
