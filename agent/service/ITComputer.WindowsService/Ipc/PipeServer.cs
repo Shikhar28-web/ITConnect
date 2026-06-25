@@ -147,6 +147,12 @@ public sealed class PipeServer : IDisposable
             PipeAccessRights.ReadWrite,
             AccessControlType.Allow));
 
+        // Everyone (provides a fallback to guarantee access for any local account)
+        pipeSecurity.AddAccessRule(new PipeAccessRule(
+            new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+            PipeAccessRights.ReadWrite,
+            AccessControlType.Allow));
+
         return NamedPipeServerStreamAcl.Create(
             PipeName,
             PipeDirection.InOut,
