@@ -560,15 +560,17 @@ function createBlackoutWindow(progressInfo) {
 
   const displays = screen.getAllDisplays();
   for (const d of displays) {
+    const { bounds } = d;
+
     const win = new BrowserWindow({
-      x: d.bounds.x,
-      y: d.bounds.y,
-      width: d.bounds.width,
-      height: d.bounds.height,
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
       // fullscreen: true ensures the window covers the Windows taskbar on the physical monitor.
       // setContentProtection(true) below makes this window invisible to WebRTC capture,
       // so the admin still sees the desktop underneath — only the employee's physical screen is blacked out.
-      fullscreen: true,
+      fullscreen: false,
       alwaysOnTop: true,
       frame: false,
       skipTaskbar: true,
@@ -585,8 +587,7 @@ function createBlackoutWindow(progressInfo) {
     // setIgnoreMouseEvents(true) so Electron doesn't intercept admin's injected input;
     // local employee input is already blocked at OS level via BlockInput + HideGlobalCursor.
     win.setIgnoreMouseEvents(true);
-    win.setAlwaysOnTop(true, 'screen-saver', 1);
-    // Exclude this window from screen capture so admin sees desktop underneath
+    win.setAlwaysOnTop(true, 'screen-saver');    // Exclude this window from screen capture so admin sees desktop underneath
     win.setContentProtection(true);
 
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(blackoutHtml)}`);
@@ -609,7 +610,7 @@ function createBlackoutWindow(progressInfo) {
     for (const win of blackoutWindows) {
       if (win && !win.isDestroyed()) {
         win.setAlwaysOnTop(true, 'screen-saver', 1);
-        win.moveTop();
+        // win.moveTop();
       }
     }
   }, 200);
@@ -770,6 +771,8 @@ function createLockWindow() {
       alwaysOnTop: true,
       frame: false,
       skipTaskbar: true,
+      thickFrame: false,
+      hasShadow: false,
       focusable: true,
       transparent: false,
       backgroundColor: '#111827',
