@@ -911,6 +911,7 @@ function RemoteSessionPage() {
                     </div>
                   </div>
                 )}
+              </div>
             </div>
 
             {/* Video Canvas */}
