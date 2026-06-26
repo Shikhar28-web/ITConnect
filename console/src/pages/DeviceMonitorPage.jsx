@@ -70,6 +70,23 @@ async function createViewStream(deviceId, onStream, onStateChange) {
     } catch (e) {}
   });
 
+  // Dummy handlers to suppress warnings for events we do not need in view-only streams
+  const noop = () => {};
+  hub.on('ActiveDesktop', noop);
+  hub.on('activeDesktop', noop);
+  hub.on('activedesktop', noop);
+  hub.on('SecureDesktopFrame', noop);
+  hub.on('secureDesktopFrame', noop);
+  hub.on('securedesktopframe', noop);
+  hub.on('ClipboardData', noop);
+  hub.on('clipboardData', noop);
+  hub.on('clipboarddata', noop);
+  hub.on('CommandOutput', noop);
+  hub.on('DirectoryListing', noop);
+  hub.on('ProcessList', noop);
+  hub.on('RegistryData', noop);
+  hub.on('FileDownloadReady', noop);
+
   pc.onicecandidate = async (event) => {
     if (event.candidate) {
       try {
