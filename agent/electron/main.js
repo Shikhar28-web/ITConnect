@@ -422,18 +422,25 @@ function startSecureDesktopServer() {
 
 // Connect to Windows Service Named Pipe for SAS and session events
 let servicePipe = null;
+let servicePipeConnected = false;
 
 function connectServicePipe() {
   if (process.platform !== 'win32') return;
   const net = require('net');
   const pipeName = '\\\\.\\pipe\\ITComputer.ServiceIpc';
-  console.log('Connecting to Windows Service Named Pipe...');
   const client = net.createConnection(pipeName);
 
   client.setEncoding('utf8');
   servicePipe = client;
 
   let buffer = '';
+  client.on('connect', () => {
+    if (!servicePipeConnected) {
+      console.log('Connected to Windows Service Named Pipe.');
+      servicePipeConnected = true;
+    }
+  });
+
   client.on('data', (data) => {
     buffer += data;
     let lines = buffer.split('\n');
@@ -444,13 +451,18 @@ function connectServicePipe() {
   });
 
   client.on('error', (err) => {
-    console.warn('Service pipe connection error:', err.message);
     servicePipe = null;
-    setTimeout(connectServicePipe, 5000); // Retry
+    if (servicePipeConnected) {
+      console.warn('Service pipe connection error:', err.message);
+    }
   });
+
   client.on('close', () => {
-    console.log('Service pipe connection closed');
     servicePipe = null;
+    if (servicePipeConnected) {
+      console.log('Service pipe connection closed');
+      servicePipeConnected = false;
+    }
     setTimeout(connectServicePipe, 5000);
   });
 }
