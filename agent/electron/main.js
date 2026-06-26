@@ -82,6 +82,7 @@ app.whenReady().then(async () => {
 
     startSecureDesktopServer();
     launchSecureDesktopHelper();
+    connectServicePipe();
   }
   startInputWorker();
   createTray();
@@ -419,20 +420,93 @@ function startSecureDesktopServer() {
   });
 }
 
+// Connect to Windows Service Named Pipe for SAS and session events
+let servicePipe = null;
+
+function connectServicePipe() {
+  if (process.platform !== 'win32') return;
+  const net = require('net');
+  const pipeName = '\\\\.\\pipe\\ITComputer.ServiceIpc';
+  console.log('Connecting to Windows Service Named Pipe...');
+  const client = net.createConnection(pipeName);
+
+  client.setEncoding('utf8');
+  servicePipe = client;
+
+  let buffer = '';
+  client.on('data', (data) => {
+    buffer += data;
+    let lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      handleServiceEvent(line.trim());
+    }
+  });
+
+  client.on('error', (err) => {
+    console.warn('Service pipe connection error:', err.message);
+    servicePipe = null;
+    setTimeout(connectServicePipe, 5000); // Retry
+  });
+  client.on('close', () => {
+    console.log('Service pipe connection closed');
+    servicePipe = null;
+    setTimeout(connectServicePipe, 5000);
+  });
+}
+
+function handleServiceEvent(line) {
+  // Session change events from Windows Service
+  const knownEvents = ['WTS_SESSION_LOCK', 'WTS_SESSION_UNLOCK', 'WTS_SESSION_LOGON',
+    'WTS_SESSION_LOGOFF', 'WTS_CONSOLE_CONNECT', 'WTS_CONSOLE_DISCONNECT',
+    'WTS_REMOTE_CONNECT', 'WTS_REMOTE_DISCONNECT'];
+
+  for (const ev of knownEvents) {
+    if (line.startsWith(ev)) {
+      const parts = line.split(' ');
+      const sessionId = parseInt(parts[1]);
+      console.log(`Windows Service session event: ${ev} on session ${sessionId}`);
+      // Notify the admin console via SignalR
+      if (signalRConnection && signalRConnection.state === 'Connected' && currentEngineerConnId) {
+        signalRConnection.invoke('SendActiveDesktop', currentEngineerConnId, ev).catch(err => {
+          console.error('Failed to send session event:', err.message);
+        });
+      }
+      return;
+    }
+  }
+}
+
+function requestSasFromService() {
+  if (servicePipe && !servicePipe.destroyed) {
+    console.log('Requesting SAS from Windows Service via Named Pipe');
+    servicePipe.write('SAS\n');
+  } else {
+    // Fallback to existing PowerShell method
+    console.log('Service pipe not connected, falling back to PowerShell SAS...');
+    const sasScriptPath = path.join(__dirname, 'send_sas.ps1');
+    exec(`powershell -NoProfile -ExecutionPolicy Bypass -File "${sasScriptPath}"`);
+  }
+}
+
 function launchSecureDesktopHelper() {
   if (secureDesktopHelperProcess) return;
 
-  const helperScriptPath = path.join(__dirname, 'secure_desktop_helper.ps1');
+  // Use native .NET ScreenCapture exe if available (preferred), else fall back to PS1
+  const nativeExePath = path.join(__dirname, '../native/ITComputer.ScreenCapture/bin/Release/net10.0-windows/win-x64/ITComputer.ScreenCapture.exe');
+  const ps1Path = path.join(__dirname, 'secure_desktop_helper.ps1');
   const port = 59300;
 
-  console.log('Launching secure desktop helper as child process in active session...');
-  secureDesktopHelperProcess = spawn('powershell', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-ExecutionPolicy', 'Bypass',
-    '-File', helperScriptPath,
-    '-Port', port.toString()
-  ]);
+  if (fs.existsSync(nativeExePath)) {
+    console.log('Launching native DXGI screen capture process...');
+    secureDesktopHelperProcess = spawn(nativeExePath, [port.toString()]);
+  } else {
+    console.log('Native capture not found, falling back to PowerShell helper...');
+    secureDesktopHelperProcess = spawn('powershell', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', ps1Path, '-Port', port.toString()
+    ]);
+  }
 
   secureDesktopHelperProcess.on('error', (spawnErr) => {
     console.error('Failed to spawn helper child process:', spawnErr);
@@ -1356,8 +1430,7 @@ async function executePowerCommand(command) {
     if (lockActive) {
       destroyLockWindow();
     }
-    const cmd = cmds.cad;
-    if (cmd) exec(cmd);
+    requestSasFromService();
     return;
   }
 

@@ -372,6 +372,22 @@ function RemoteSessionPage() {
           setSecureDesktopFrame(base64Frame);
         },
         onActiveDesktop: (desktopName) => {
+          const sessionEvents = {
+            'WTS_SESSION_LOCK': '🔒 Target machine locked — stream continues',
+            'WTS_SESSION_UNLOCK': '🔓 Target machine unlocked',
+            'WTS_SESSION_LOGON': '👤 User logged on to target',
+            'WTS_SESSION_LOGOFF': '🚪 User logged off target machine',
+            'WTS_CONSOLE_CONNECT': '🖥️ Console session connected',
+            'WTS_REMOTE_CONNECT': '🌐 RDP session connected to target',
+          };
+          if (sessionEvents[desktopName]) {
+            toast.info(sessionEvents[desktopName], { autoClose: 3000 });
+          }
+
+          if (desktopName && desktopName.startsWith('WTS_')) {
+            return;
+          }
+
           setActiveDesktopName(desktopName);
           if (desktopName !== 'Default' && desktopName !== 'unknown') {
             setSecureDesktopActive(true);
