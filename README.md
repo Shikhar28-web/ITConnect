@@ -100,13 +100,13 @@ npm run electron:build   # Build installer
 | Session Recording | ✅ |
 | Support Ticket Integration | ✅ |
 | Audit Logs (Tamper-Evident Chain) | ✅ |
-| Real-time Notifications (SignalR) | ✅ |
+| Device Monitor Wall (View-Only Multi-stream) | ✅ |
+| Custom Device Grouping & Layouts | ✅ |
 | Monitoring Dashboard | ✅ |
 | Device Metrics (CPU/RAM/Disk) | ✅ |
 | Engineer Performance Reports | ✅ |
 | Device Health Reports | ✅ |
 | User Management | ✅ |
-| Session History | ✅ |
 | AES-256 WebRTC Encryption | ✅ |
 | TLS 1.3 (via HTTPS) | ✅ |
 
@@ -117,6 +117,8 @@ npm run electron:build   # Build installer
 SQLite (default) — auto-created and migrated on startup.
 
 Tables: `Users`, `Devices`, `DeviceMetrics`, `RemoteSessions`, `SessionRecordings`, `SessionLogs`, `SupportTickets`, `FileTransfers`, `ChatMessages`, `Notifications`, `SoftwareDeployments`, `AuditLogs`
+
+*(Note: Real-time Notifications and Session History pages have been removed from the client dashboard console UI.)*
 
 ---
 
@@ -160,7 +162,6 @@ Key endpoints:
 - `POST /api/sessions/start` — Start remote session
 - `GET /api/reports/dashboard` — Dashboard stats
 - `WS /hubs/remote-control` — WebRTC signaling
-- `WS /hubs/notifications` — Real-time alerts
 - `WS /hubs/chat` — Session chat
 
 ---
