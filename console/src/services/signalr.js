@@ -21,8 +21,8 @@ class SignalRService {
       .withAutomaticReconnect([0, 2000, 5000, 10000])
       .configureLogging(signalR.LogLevel.Warning)
       .build();
-
-    // Register event handlers
+   
+ // Register event handlers
     if (handlers.onAnswer) this.remoteControlHub.on('ReceiveAnswer', handlers.onAnswer);
     if (handlers.onIceCandidate) this.remoteControlHub.on('ReceiveIceCandidate', handlers.onIceCandidate);
     if (handlers.onCommandOutput) this.remoteControlHub.on('CommandOutput', handlers.onCommandOutput);

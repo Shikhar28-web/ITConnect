@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { devices, sessions } from '../services/api';
+import DeviceMonitorPage from './DeviceMonitorPage';
 
 function DeviceCard({ device, onConnect, onWoL, onAuthorize }) {
   const statusClass = device.status.toLowerCase().replace('insession', 'insession');
@@ -126,7 +127,13 @@ function DevicesPage() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [view, setView] = useState('grid'); // 'grid' | 'table'
+  const [mainTab, setMainTab] = useState(() => sessionStorage.getItem('devices_main_tab') || 'list'); // 'list' | 'monitor'
   const navigate = useNavigate();
+
+  function switchMainTab(tab) {
+    setMainTab(tab);
+    sessionStorage.setItem('devices_main_tab', tab);
+  }
 
   useEffect(() => {
     loadDevices();
@@ -192,7 +199,32 @@ function DevicesPage() {
   if (loading) return <div className="loading-overlay"><div className="loading-spinner lg" /></div>;
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* ─── Main tab bar ─── */}
+      <div className="devices-main-tabs">
+        <button
+          id="tab-device-list"
+          className={`devices-main-tab ${mainTab === 'list' ? 'active' : ''}`}
+          onClick={() => switchMainTab('list')}
+        >
+          🖥️ Device List
+        </button>
+        <button
+          id="tab-monitor-wall"
+          className={`devices-main-tab ${mainTab === 'monitor' ? 'active' : ''}`}
+          onClick={() => switchMainTab('monitor')}
+        >
+          📺 Monitor Wall
+          <span className="devices-main-tab-badge">NEW</span>
+        </button>
+      </div>
+
+      {/* Monitor Wall */}
+      {mainTab === 'monitor' && <DeviceMonitorPage />}
+
+      {/* Device List */}
+      {mainTab === 'list' && (
+      <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>
@@ -299,6 +331,8 @@ function DevicesPage() {
             </tbody>
           </table>
         </div>
+      )}
+    </div>
       )}
     </div>
   );

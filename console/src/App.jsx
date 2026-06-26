@@ -9,6 +9,7 @@ import Topbar from './components/Topbar';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import DevicesPage from './pages/DevicesPage';
+import DeviceMonitorPage from './pages/DeviceMonitorPage';
 import RemoteSessionPage from './pages/RemoteSessionPage';
 import UsersPage from './pages/UsersPage';
 import AuditLogsPage from './pages/AuditLogsPage';
@@ -72,6 +73,7 @@ function App() {
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/devices" element={<DevicesPage />} />
+              <Route path="/devices/monitor" element={<DeviceMonitorPage />} />
               <Route path="/devices/:deviceId/session" element={<RemoteSessionPage />} />
               <Route path="/users" element={<UsersPage />} />
               <Route path="/audit-logs" element={<AuditLogsPage />} />
