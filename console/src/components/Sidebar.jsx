@@ -5,8 +5,6 @@ const navItems = [
   { section: 'Main', items: [
     { to: '/dashboard', icon: '📊', label: 'Dashboard' },
     { to: '/devices', icon: '🖥️', label: 'Devices' },
-    { to: '/sessions', icon: '🔗', label: 'Sessions' },
-    { to: '/notifications', icon: '🔔', label: 'Notifications', badge: true },
   ]},
   { section: 'Admin', items: [
     { to: '/users', icon: '👤', label: 'Users' },

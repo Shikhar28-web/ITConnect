@@ -438,9 +438,14 @@ function MonitorFocusModal({ focusData, onClose, navigate }) {
             {/* Connect with control */}
             <button
               className="btn btn-primary btn-sm"
-              onClick={() => {
-                onClose();
-                navigate(`/devices/${device.id}/session?viewOnly=true`);
+              onClick={async () => {
+                try {
+                  const session = await sessionsApi.start(device.id, null, true);
+                  onClose();
+                  navigate(`/devices/${device.id}/session?sessionId=${session.id}`);
+                } catch (e) {
+                  toast.error(e.response?.data?.message || 'Failed to start session');
+                }
               }}
             >
               🔗 Take Control
