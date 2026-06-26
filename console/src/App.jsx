@@ -15,8 +15,6 @@ import UsersPage from './pages/UsersPage';
 import AuditLogsPage from './pages/AuditLogsPage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
-import SessionHistoryPage from './pages/SessionHistoryPage';
-import NotificationsPage from './pages/NotificationsPage';
 import { signalRService } from './services/signalr';
 
 function App() {
@@ -24,21 +22,6 @@ function App() {
     const stored = localStorage.getItem('user');
     return stored ? JSON.parse(stored) : null;
   });
-
-  const [unreadNotifs, setUnreadNotifs] = useState(0);
-
-  useEffect(() => {
-    if (user) {
-      // Connect notification hub
-      signalRService.connectNotifications((notif) => {
-        setUnreadNotifs(c => c + 1);
-      }).catch(console.error);
-    }
-
-    const handleUnread = (e) => setUnreadNotifs(e.detail?.length || 0);
-    window.addEventListener('unread-notifications', handleUnread);
-    return () => window.removeEventListener('unread-notifications', handleUnread);
-  }, [user]);
 
   const handleLogin = (userData, tokens) => {
     localStorage.setItem('accessToken', tokens.accessToken);
@@ -65,9 +48,9 @@ function App() {
   return (
     <HashRouter>
       <div className="app-layout">
-        <Sidebar user={user} unreadNotifs={unreadNotifs} />
+        <Sidebar user={user} />
         <div className="main-content">
-          <Topbar user={user} onLogout={handleLogout} unreadNotifs={unreadNotifs} />
+          <Topbar user={user} onLogout={handleLogout} />
           <div className="page-content">
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -78,8 +61,6 @@ function App() {
               <Route path="/users" element={<UsersPage />} />
               <Route path="/audit-logs" element={<AuditLogsPage />} />
               <Route path="/reports" element={<ReportsPage />} />
-              <Route path="/sessions" element={<SessionHistoryPage />} />
-              <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>

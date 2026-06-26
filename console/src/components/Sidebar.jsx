@@ -14,7 +14,7 @@ const navItems = [
   ]},
 ];
 
-function Sidebar({ user, unreadNotifs }) {
+function Sidebar({ user }) {
   const isAdmin = ['SuperAdmin', 'Admin'].includes(user?.role);
 
   return (
@@ -35,7 +35,7 @@ function Sidebar({ user, unreadNotifs }) {
           return (
             <React.Fragment key={section}>
               <div className="nav-section-label">{section}</div>
-              {items.map(({ to, icon, label, badge }) => (
+              {items.map(({ to, icon, label }) => (
                 <NavLink
                   key={to}
                   to={to}
@@ -43,9 +43,6 @@ function Sidebar({ user, unreadNotifs }) {
                 >
                   <span className="nav-icon">{icon}</span>
                   <span>{label}</span>
-                  {badge && unreadNotifs > 0 && (
-                    <span className="nav-badge">{unreadNotifs > 99 ? '99+' : unreadNotifs}</span>
-                  )}
                 </NavLink>
               ))}
             </React.Fragment>

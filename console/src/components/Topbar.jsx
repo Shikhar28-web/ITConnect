@@ -4,15 +4,13 @@ import { useLocation } from 'react-router-dom';
 const pageTitles = {
   '/dashboard': 'Dashboard',
   '/devices': 'Device Management',
-  '/sessions': 'Session History',
-  '/notifications': 'Notifications',
   '/users': 'User Management',
   '/audit-logs': 'Audit Logs',
   '/reports': 'Reports & Analytics',
   '/settings': 'Settings',
 };
 
-function Topbar({ user, onLogout, unreadNotifs }) {
+function Topbar({ user, onLogout }) {
   const location = useLocation();
   const title = pageTitles[location.pathname] || 'IT Console';
 
@@ -21,15 +19,6 @@ function Topbar({ user, onLogout, unreadNotifs }) {
       <h1 className="topbar-title">{title}</h1>
 
       <div className="topbar-actions">
-        <button
-          className="topbar-btn"
-          title="Notifications"
-          onClick={() => window.location.href = '#/notifications'}
-        >
-          🔔
-          {unreadNotifs > 0 && <span className="topbar-notif-dot" />}
-        </button>
-
         <button className="topbar-btn" title="Help">❓</button>
 
         <div
