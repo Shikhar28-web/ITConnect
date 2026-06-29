@@ -25,6 +25,26 @@ public class ScreenCaptureLauncher
         out PROCESS_INFORMATION lpProcessInformation);
 
     [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool DuplicateTokenEx(
+        IntPtr hExistingToken,
+        uint dwDesiredAccess,
+        IntPtr lpTokenAttributes,
+        int ImpersonationLevel,
+        int TokenType,
+        out IntPtr phNewToken);
+
+    private const uint PROCESS_QUERY_INFORMATION = 0x0400;
+    private const uint TOKEN_DUPLICATE = 0x0002;
+    private const uint TOKEN_QUERY = 0x0008;
+    private const uint TOKEN_ASSIGN_PRIMARY = 0x0001;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -68,6 +88,33 @@ public class ScreenCaptureLauncher
         _logger = logger;
     }
 
+    private IntPtr GetSessionSystemToken(int sessionId)
+    {
+        var processes = Process.GetProcessesByName("winlogon");
+        foreach (var p in processes)
+        {
+            if (p.SessionId == sessionId)
+            {
+                IntPtr hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, false, p.Id);
+                if (hProcess != IntPtr.Zero)
+                {
+                    if (OpenProcessToken(hProcess, TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY, out var hToken))
+                    {
+                        if (DuplicateTokenEx(hToken, 0xF01FF /* TOKEN_ALL_ACCESS */, IntPtr.Zero, 2 /* SecurityImpersonation */, 1 /* TokenPrimary */, out var hNewToken))
+                        {
+                            CloseHandle(hToken);
+                            CloseHandle(hProcess);
+                            return hNewToken;
+                        }
+                        CloseHandle(hToken);
+                    }
+                    CloseHandle(hProcess);
+                }
+            }
+        }
+        return IntPtr.Zero;
+    }
+
     public void LaunchInSession(int sessionId, string desktopName = "winsta0\\default")
     {
         lock (_processLock)
@@ -89,12 +136,25 @@ public class ScreenCaptureLauncher
                 _captureProcess = null;
             }
 
+            IntPtr token = IntPtr.Zero;
             try
             {
-                if (!WTSQueryUserToken((uint)sessionId, out var token))
+                if (desktopName.Contains("Winlogon", StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogWarning($"WTSQueryUserToken failed for session {sessionId}. This is expected if no user is logged on.");
-                    return;
+                    token = GetSessionSystemToken(sessionId);
+                    if (token == IntPtr.Zero)
+                    {
+                        _logger.LogWarning($"Failed to get SYSTEM token from winlogon process for session {sessionId}.");
+                        return;
+                    }
+                }
+                else
+                {
+                    if (!WTSQueryUserToken((uint)sessionId, out token))
+                    {
+                        _logger.LogWarning($"WTSQueryUserToken failed for session {sessionId}. This is expected if no user is logged on.");
+                        return;
+                    }
                 }
 
                 var baseDir = AppContext.BaseDirectory;
@@ -109,7 +169,6 @@ public class ScreenCaptureLauncher
                 if (!System.IO.File.Exists(exePath))
                 {
                     _logger.LogError($"Could not find ITComputer.ScreenCapture.exe at {exePath}");
-                    CloseHandle(token);
                     return;
                 }
 
@@ -119,7 +178,7 @@ public class ScreenCaptureLauncher
                     lpDesktop = desktopName
                 };
 
-                _logger.LogInformation($"Launching capture exe in session {sessionId}: {exePath}");
+                _logger.LogInformation($"Launching capture exe in session {sessionId} on desktop {desktopName}: {exePath}");
                 bool ok = CreateProcessAsUser(
                     token,
                     exePath,
@@ -132,8 +191,6 @@ public class ScreenCaptureLauncher
                     null,
                     ref si,
                     out var pi);
-
-                CloseHandle(token);
 
                 if (ok)
                 {
@@ -150,6 +207,13 @@ public class ScreenCaptureLauncher
             catch (Exception ex)
             {
                 _logger.LogError($"LaunchInSession failed: {ex.Message}");
+            }
+            finally
+            {
+                if (token != IntPtr.Zero)
+                {
+                    CloseHandle(token);
+                }
             }
         }
     }
