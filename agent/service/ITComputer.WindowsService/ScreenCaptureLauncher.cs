@@ -159,6 +159,11 @@ public class ScreenCaptureLauncher
                 var exePath = System.IO.Path.Combine(baseDir, "ITComputer.ScreenCapture.exe");
                 if (!System.IO.File.Exists(exePath))
                 {
+                    // Try the publish folder first
+                    exePath = System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "../../../native/ITComputer.ScreenCapture/bin/Release/net10.0-windows/win-x64/publish/ITComputer.ScreenCapture.exe"));
+                }
+                if (!System.IO.File.Exists(exePath))
+                {
                     // Fallback to native project release folder
                     exePath = System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, "../../../native/ITComputer.ScreenCapture/bin/Release/net10.0-windows/win-x64/ITComputer.ScreenCapture.exe"));
                 }

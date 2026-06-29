@@ -1182,20 +1182,10 @@ async function connectSignalR() {
         } else if (input.type === 'wheel') {
           secureDesktopSocket.write(`w ${input.delta}\n`);
         } else if (input.type === 'key') {
-          if (['control', 'shift', 'alt', 'meta'].includes(input.key.toLowerCase())) {
-            return;
-          }
-          let combo = '';
-          if (input.ctrl) combo += '^';
-          if (input.alt) combo += '%';
-          if (input.shift) combo += '+';
-          const mapped = mapKeyToSendKeys(input.key);
-          if (mapped.length === 1 && ['+', '^', '%', '~', '{', '}', '[', ']'].includes(mapped)) {
-            combo += `{${mapped}}`;
-          } else {
-            combo += mapped;
-          }
-          secureDesktopSocket.write(`k ${combo}\n`);
+          const ctrlVal = input.ctrl ? 1 : 0;
+          const altVal = input.alt ? 1 : 0;
+          const shiftVal = input.shift ? 1 : 0;
+          secureDesktopSocket.write(`k ${input.keyCode} ${ctrlVal} ${altVal} ${shiftVal}\n`);
         }
       }
     } catch (e) {

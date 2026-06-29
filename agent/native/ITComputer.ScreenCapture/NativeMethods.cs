@@ -36,52 +36,16 @@ public static class NativeMethods
     public const int SRCCOPY = 0x00CC0020;
     public const int CAPTUREBLT = 0x40000000;
 
-    // SendInput structure declarations
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
 
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int x, int y);
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct INPUT
-    {
-        public uint type;
-        public INPUTUNION U;
-    }
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, uint dwExtraInfo);
 
-    [StructLayout(LayoutKind.Explicit)]
-    public struct INPUTUNION
-    {
-        [FieldOffset(0)]
-        public MOUSEINPUT mi;
-        [FieldOffset(0)]
-        public KEYBDINPUT ki;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MOUSEINPUT
-    {
-        public int dx;
-        public int dy;
-        public uint mouseData;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct KEYBDINPUT
-    {
-        public ushort wVk;
-        public ushort wScan;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
-    }
-
-    public const uint INPUT_MOUSE = 0;
-    public const uint INPUT_KEYBOARD = 1;
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, uint dwExtraInfo);
 
     public const uint MOUSEEVENTF_MOVE = 0x0001;
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
@@ -107,13 +71,9 @@ public static class NativeMethods
             down = MOUSEEVENTF_MIDDLEDOWN;
             up = MOUSEEVENTF_MIDDLEUP;
         }
-
-        var inputs = new[]
-        {
-            new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = down } } },
-            new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = up } } }
-        };
-        SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        mouse_event(down, 0, 0, 0, 0);
+        System.Threading.Thread.Sleep(15);
+        mouse_event(up, 0, 0, 0, 0);
     }
 
     public static void InjectMouseDown(int x, int y, int button)
@@ -122,12 +82,7 @@ public static class NativeMethods
         uint down = MOUSEEVENTF_LEFTDOWN;
         if (button == 2) down = MOUSEEVENTF_RIGHTDOWN;
         else if (button == 1) down = MOUSEEVENTF_MIDDLEDOWN;
-
-        var inputs = new[]
-        {
-            new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = down } } }
-        };
-        SendInput(1, inputs, Marshal.SizeOf<INPUT>());
+        mouse_event(down, 0, 0, 0, 0);
     }
 
     public static void InjectMouseUp(int x, int y, int button)
@@ -136,21 +91,12 @@ public static class NativeMethods
         uint up = MOUSEEVENTF_LEFTUP;
         if (button == 2) up = MOUSEEVENTF_RIGHTUP;
         else if (button == 1) up = MOUSEEVENTF_MIDDLEUP;
-
-        var inputs = new[]
-        {
-            new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = up } } }
-        };
-        SendInput(1, inputs, Marshal.SizeOf<INPUT>());
+        mouse_event(up, 0, 0, 0, 0);
     }
 
     public static void InjectMouseWheel(int delta)
     {
-        var inputs = new[]
-        {
-            new INPUT { type = INPUT_MOUSE, U = new INPUTUNION { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_WHEEL, mouseData = (uint)delta } } }
-        };
-        SendInput(1, inputs, Marshal.SizeOf<INPUT>());
+        mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (uint)delta, 0);
     }
 
     public static void InjectKey(string combo)
@@ -162,6 +108,36 @@ public static class NativeMethods
         catch
         {
             // Ignore key injection failure (e.g. if focus is lost)
+        }
+    }
+
+    public static void InjectRawKey(int vk, bool ctrl, bool alt, bool shift)
+    {
+        const uint KEYEVENTF_KEYUP = 0x0002;
+        const byte VK_SHIFT = 0x10;
+        const byte VK_CONTROL = 0x11;
+        const byte VK_MENU = 0x12;
+
+        try
+        {
+            // Press modifiers
+            if (ctrl) keybd_event(VK_CONTROL, 0, 0, 0);
+            if (alt) keybd_event(VK_MENU, 0, 0, 0);
+            if (shift) keybd_event(VK_SHIFT, 0, 0, 0);
+
+            // Press and release the key
+            keybd_event((byte)vk, 0, 0, 0);
+            System.Threading.Thread.Sleep(10);
+            keybd_event((byte)vk, 0, KEYEVENTF_KEYUP, 0);
+
+            // Release modifiers
+            if (shift) keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0);
+            if (alt) keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
+            if (ctrl) keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
+        }
+        catch
+        {
+            // Ignore key injection failure
         }
     }
 }

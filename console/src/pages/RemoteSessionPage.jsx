@@ -613,6 +613,7 @@ function RemoteSessionPage() {
       await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({
         type: 'key',
         key: e.key,
+        keyCode: e.keyCode,
         ctrl: e.ctrlKey,
         alt: e.altKey,
         shift: e.shiftKey

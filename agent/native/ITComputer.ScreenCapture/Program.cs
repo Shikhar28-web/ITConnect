@@ -159,8 +159,18 @@ class Program
                         NativeMethods.InjectMouseWheel(int.Parse(parts[1]));
                     break;
                 case "k":
-                    if (line.Length > 2)
+                    if (parts.Length >= 5)
+                    {
+                        int vk = int.Parse(parts[1]);
+                        bool ctrl = parts[2] == "1";
+                        bool alt = parts[3] == "1";
+                        bool shift = parts[4] == "1";
+                        NativeMethods.InjectRawKey(vk, ctrl, alt, shift);
+                    }
+                    else if (line.Length > 2)
+                    {
                         NativeMethods.InjectKey(line.Substring(2));
+                    }
                     break;
             }
         }
