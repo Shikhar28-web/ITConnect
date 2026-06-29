@@ -24,8 +24,8 @@ public class Worker : BackgroundService
         _logger.LogInformation("ITComputer Windows Service execution started");
 
         _sessionHandler = new SessionNotificationHandler(_logger);
+        _ipcServer = new NamedPipeIpcServer(_logger, _sessionHandler);
         _captureLauncher = new ScreenCaptureLauncher(_logger);
-        _ipcServer = new NamedPipeIpcServer(_logger, _sessionHandler, _captureLauncher);
 
         _sessionHandler.OnSessionChanged += (eventId, sessionId) =>
         {
@@ -40,11 +40,7 @@ public class Worker : BackgroundService
                 eventId == WTS_SESSION_EVENTS.WTS_CONSOLE_CONNECT ||
                 eventId == WTS_SESSION_EVENTS.WTS_REMOTE_CONNECT)
             {
-                _captureLauncher.LaunchInSession(sessionId, "winsta0\\default");
-            }
-            else if (eventId == WTS_SESSION_EVENTS.WTS_SESSION_LOCK)
-            {
-                _captureLauncher.LaunchInSession(sessionId, "winsta0\\Winlogon");
+                _captureLauncher.LaunchInSession(sessionId);
             }
         };
 
