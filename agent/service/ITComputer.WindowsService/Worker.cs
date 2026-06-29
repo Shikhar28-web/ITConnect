@@ -40,7 +40,11 @@ public class Worker : BackgroundService
                 eventId == WTS_SESSION_EVENTS.WTS_CONSOLE_CONNECT ||
                 eventId == WTS_SESSION_EVENTS.WTS_REMOTE_CONNECT)
             {
-                _captureLauncher.LaunchInSession(sessionId);
+                _captureLauncher.LaunchInSession(sessionId, "winsta0\\default");
+            }
+            else if (eventId == WTS_SESSION_EVENTS.WTS_SESSION_LOCK)
+            {
+                _captureLauncher.LaunchInSession(sessionId, "winsta0\\Winlogon");
             }
         };
 

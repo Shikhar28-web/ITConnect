@@ -68,7 +68,7 @@ public class ScreenCaptureLauncher
         _logger = logger;
     }
 
-    public void LaunchInSession(int sessionId)
+    public void LaunchInSession(int sessionId, string desktopName = "winsta0\\default")
     {
         lock (_processLock)
         {
@@ -116,7 +116,7 @@ public class ScreenCaptureLauncher
                 var si = new STARTUPINFO
                 {
                     cb = Marshal.SizeOf<STARTUPINFO>(),
-                    lpDesktop = "winsta0\\default"
+                    lpDesktop = desktopName
                 };
 
                 _logger.LogInformation($"Launching capture exe in session {sessionId}: {exePath}");
