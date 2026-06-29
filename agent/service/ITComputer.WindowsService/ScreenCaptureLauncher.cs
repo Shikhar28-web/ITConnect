@@ -11,18 +11,19 @@ public class ScreenCaptureLauncher
     private static extern bool WTSQueryUserToken(uint SessionId, out IntPtr Token);
 
     [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern bool CreateProcessAsUser(
+    private static extern bool CreateProcessWithTokenW(
         IntPtr hToken,
+        uint dwLogonFlags,
         string? lpApplicationName,
         string? lpCommandLine,
-        IntPtr lpProcessAttributes,
-        IntPtr lpThreadAttributes,
-        bool bInheritHandles,
         uint dwCreationFlags,
         IntPtr lpEnvironment,
         string? lpCurrentDirectory,
         ref STARTUPINFO lpStartupInfo,
         out PROCESS_INFORMATION lpProcessInformation);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
@@ -43,9 +44,6 @@ public class ScreenCaptureLauncher
     private const uint TOKEN_DUPLICATE = 0x0002;
     private const uint TOKEN_QUERY = 0x0008;
     private const uint TOKEN_ASSIGN_PRIMARY = 0x0001;
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(IntPtr hObject);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct STARTUPINFO
@@ -179,14 +177,12 @@ public class ScreenCaptureLauncher
                 };
 
                 _logger.LogInformation($"Launching capture exe in session {sessionId} on desktop {desktopName}: {exePath}");
-                bool ok = CreateProcessAsUser(
+                bool ok = CreateProcessWithTokenW(
                     token,
+                    0, // dwLogonFlags
                     exePath,
                     $"\"{exePath}\" 59300",
-                    IntPtr.Zero,
-                    IntPtr.Zero,
-                    false,
-                    0,
+                    0, // dwCreationFlags
                     IntPtr.Zero,
                     null,
                     ref si,
@@ -201,7 +197,7 @@ public class ScreenCaptureLauncher
                 }
                 else
                 {
-                    _logger.LogError($"CreateProcessAsUser failed. Error code: {Marshal.GetLastWin32Error()}");
+                    _logger.LogError($"CreateProcessWithTokenW failed. Error code: {Marshal.GetLastWin32Error()}");
                 }
             }
             catch (Exception ex)
