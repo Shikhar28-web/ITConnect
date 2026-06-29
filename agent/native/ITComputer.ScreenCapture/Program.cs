@@ -140,7 +140,7 @@ class Program
             {
                 case "m":
                     if (parts.Length >= 3)
-                        NativeMethods.SetCursorPos(int.Parse(parts[1]), int.Parse(parts[2]));
+                        NativeMethods.SendMouseMoveAbsolute(int.Parse(parts[1]), int.Parse(parts[2]));
                     break;
                 case "c":
                     if (parts.Length >= 4)
