@@ -74,6 +74,33 @@ public class ScreenCaptureLauncher
         public uint dwThreadId;
     }
 
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool LookupPrivilegeValue(string? lpSystemName, string lpName, out LUID lpLuid);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool AdjustTokenPrivileges(
+        IntPtr TokenHandle,
+        bool DisableAllPrivileges,
+        ref TOKEN_PRIVILEGES NewState,
+        uint BufferLength,
+        IntPtr PreviousState,
+        IntPtr ReturnLength);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LUID
+    {
+        public uint LowPart;
+        public int HighPart;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TOKEN_PRIVILEGES
+    {
+        public uint PrivilegeCount;
+        public LUID Luid;
+        public uint Attributes;
+    }
+
     private readonly ILogger _logger;
     private Process? _captureProcess;
     private readonly object _processLock = new();
@@ -83,14 +110,65 @@ public class ScreenCaptureLauncher
         _logger = logger;
     }
 
+    private bool EnableDebugPrivilege()
+    {
+        IntPtr hToken = IntPtr.Zero;
+        try
+        {
+            Process currentProcess = Process.GetCurrentProcess();
+            if (!OpenProcessToken(currentProcess.Handle, 0x0020 | 0x0008, out hToken)) // TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY
+            {
+                return false;
+            }
+
+            LUID luid;
+            if (!LookupPrivilegeValue(null, "SeDebugPrivilege", out luid))
+            {
+                return false;
+            }
+
+            TOKEN_PRIVILEGES tp = new TOKEN_PRIVILEGES();
+            tp.PrivilegeCount = 1;
+            tp.Luid = luid;
+            tp.Attributes = 0x00000002; // SE_PRIVILEGE_ENABLED
+
+            if (!AdjustTokenPrivileges(hToken, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero))
+            {
+                return false;
+            }
+
+            return Marshal.GetLastWin32Error() != 1443; // ERROR_NOT_ALL_ASSIGNED
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (hToken != IntPtr.Zero)
+            {
+                CloseHandle(hToken);
+            }
+        }
+    }
+
     private IntPtr GetSystemTokenForSession(int sessionId)
     {
+        bool privEnabled = EnableDebugPrivilege();
+        _logger.LogInformation($"SeDebugPrivilege enablement status: {privEnabled}");
+
         var processes = Process.GetProcessesByName("winlogon");
         foreach (var p in processes)
         {
             if (p.SessionId == sessionId)
             {
-                IntPtr hProcess = OpenProcess(0x0400, false, p.Id); // PROCESS_QUERY_INFORMATION
+                IntPtr hProcess = OpenProcess(0x0400 | 0x1000, false, p.Id); // PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION
+                if (hProcess == IntPtr.Zero)
+                {
+                    // Try with standard access if full query info fails
+                    hProcess = OpenProcess(0x0400, false, p.Id);
+                }
+
                 if (hProcess != IntPtr.Zero)
                 {
                     if (OpenProcessToken(hProcess, 0x0002 | 0x0004 | 0x0008 | 0x0010 | 0x0020, out var hToken)) // TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY
@@ -102,12 +180,18 @@ public class ScreenCaptureLauncher
                             CloseHandle(hToken);
                             return duplicatedToken;
                         }
+                        _logger.LogWarning($"DuplicateTokenEx failed. Error: {Marshal.GetLastWin32Error()}");
                         CloseHandle(hToken);
                     }
                     else
                     {
+                        _logger.LogWarning($"OpenProcessToken failed for winlogon in session {sessionId}. Error: {Marshal.GetLastWin32Error()}");
                         CloseHandle(hProcess);
                     }
+                }
+                else
+                {
+                    _logger.LogWarning($"OpenProcess failed for winlogon PID {p.Id} in session {sessionId}. Error: {Marshal.GetLastWin32Error()}");
                 }
             }
         }
