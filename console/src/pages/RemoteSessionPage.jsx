@@ -517,7 +517,7 @@ function RemoteSessionPage() {
   };
 
   const handleMouseMove = useCallback(async (e) => {
-    if (annotation || !connected) return;
+    if (annotation || (!connected && !secureDesktopActive)) return;
     const now = Date.now();
     if (now - lastMouseMoveTime.current < 50) return; // Throttle to 20 events per second
     lastMouseMoveTime.current = now;
@@ -533,7 +533,7 @@ function RemoteSessionPage() {
   }, [annotation, connected, deviceId, secureDesktopActive]);
 
   const handleMouseDown = useCallback(async (e) => {
-    if (annotation || !connected) return;
+    if (annotation || (!connected && !secureDesktopActive)) return;
     const coords = getMouseCoords(e);
     if (!coords) return;
 
@@ -545,7 +545,7 @@ function RemoteSessionPage() {
   }, [annotation, connected, deviceId, secureDesktopActive]);
 
   const handleMouseUp = useCallback(async (e) => {
-    if (annotation || !connected) return;
+    if (annotation || (!connected && !secureDesktopActive)) return;
     const coords = getMouseCoords(e);
     if (!coords) return;
 
@@ -559,7 +559,7 @@ function RemoteSessionPage() {
   }, [annotation, connected, deviceId, secureDesktopActive]);
 
   const handleWheel = useCallback(async (e) => {
-    if (annotation || !connected) return;
+    if (annotation || (!connected && !secureDesktopActive)) return;
     const delta = e.deltaY > 0 ? -120 : 120;
     if (secureDesktopActive) {
       await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'wheel', delta }));
@@ -607,7 +607,7 @@ function RemoteSessionPage() {
   };
 
   const handleKeyDown = useCallback(async (e) => {
-    if (!connected || document.activeElement.tagName === 'INPUT') return;
+    if ((!connected && !secureDesktopActive) || document.activeElement.tagName === 'INPUT') return;
     e.preventDefault();
     if (secureDesktopActive) {
       await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({
