@@ -123,6 +123,9 @@ class Program
 
     static void ProcessInputCommand(string line)
     {
+        Log($"--- INPUT RECEIVED --- Packet: '{line}'");
+        Log(NativeMethods.GetProcessIdentityInfo());
+
         var thread = new System.Threading.Thread(() =>
         {
             try
@@ -130,19 +133,57 @@ class Program
                 IntPtr hDesk = NativeMethods.OpenInputDesktop(0, false, 0x01FF);
                 if (hDesk != IntPtr.Zero)
                 {
-                    bool setDeskOk = NativeMethods.SetThreadDesktop(hDesk);
-                    if (!setDeskOk)
+                    var sb = new StringBuilder(256);
+                    string deskName = "Unknown";
+                    if (NativeMethods.GetUserObjectInformation(hDesk, 2, sb, (uint)sb.Capacity, out var needed))
                     {
-                        Log($"SetThreadDesktop failed for injection thread. Error: {Marshal.GetLastWin32Error()}");
+                        deskName = sb.ToString();
+                    }
+                    Log($"OpenInputDesktop returned: {hDesk} (Name: {deskName})");
+
+                    bool setDeskOk = NativeMethods.SetThreadDesktop(hDesk);
+                    if (setDeskOk)
+                    {
+                        Log($"SetThreadDesktop succeeded. Thread attached to desktop: {deskName}");
+                    }
+                    else
+                    {
+                        Log($"SetThreadDesktop failed. Error: {Marshal.GetLastWin32Error()}");
                     }
                     NativeMethods.CloseDesktop(hDesk);
                 }
+                else
+                {
+                    Log($"OpenInputDesktop failed. Error: {Marshal.GetLastWin32Error()}");
+                }
+
+                NativeMethods.POINT ptBefore;
+                bool getPosBefore = NativeMethods.GetCursorPos(out ptBefore);
+                if (getPosBefore)
+                {
+                    Log($"Cursor pos BEFORE injection: X={ptBefore.x}, Y={ptBefore.y}");
+                }
+                else
+                {
+                    Log($"GetCursorPos BEFORE failed. Error: {Marshal.GetLastWin32Error()}");
+                }
 
                 ExecuteCommandInternal(line);
+
+                NativeMethods.POINT ptAfter;
+                bool getPosAfter = NativeMethods.GetCursorPos(out ptAfter);
+                if (getPosAfter)
+                {
+                    Log($"Cursor pos AFTER injection: X={ptAfter.x}, Y={ptAfter.y}");
+                }
+                else
+                {
+                    Log($"GetCursorPos AFTER failed. Error: {Marshal.GetLastWin32Error()}");
+                }
             }
             catch (Exception ex)
             {
-                Log($"Injection thread failed: {ex.Message}");
+                Log($"Injection thread failed: {ex.Message}\n{ex.StackTrace}");
             }
         });
         thread.SetApartmentState(System.Threading.ApartmentState.STA);
@@ -159,23 +200,50 @@ class Program
         {
             case "m":
                 if (parts.Length >= 3)
-                    NativeMethods.InjectMouseMove(int.Parse(parts[1]), int.Parse(parts[2]));
+                {
+                    int x = int.Parse(parts[1]);
+                    int y = int.Parse(parts[2]);
+                    NativeMethods.InjectMouseMove(x, y);
+                    Log($"Executing InjectMouseMove: X={x}, Y={y} (GetLastError: {Marshal.GetLastWin32Error()})");
+                }
                 break;
             case "c":
                 if (parts.Length >= 4)
-                    NativeMethods.InjectMouseClick(int.Parse(parts[1]), int.Parse(parts[2]), int.Parse(parts[3]));
+                {
+                    int x = int.Parse(parts[1]);
+                    int y = int.Parse(parts[2]);
+                    int button = int.Parse(parts[3]);
+                    NativeMethods.InjectMouseClick(x, y, button);
+                    Log($"Executing InjectMouseClick: X={x}, Y={y}, Button={button} (GetLastError: {Marshal.GetLastWin32Error()})");
+                }
                 break;
             case "d":
                 if (parts.Length >= 4)
-                    NativeMethods.InjectMouseDown(int.Parse(parts[1]), int.Parse(parts[2]), int.Parse(parts[3]));
+                {
+                    int x = int.Parse(parts[1]);
+                    int y = int.Parse(parts[2]);
+                    int button = int.Parse(parts[3]);
+                    NativeMethods.InjectMouseDown(x, y, button);
+                    Log($"Executing InjectMouseDown: X={x}, Y={y}, Button={button} (GetLastError: {Marshal.GetLastWin32Error()})");
+                }
                 break;
             case "u":
                 if (parts.Length >= 4)
-                    NativeMethods.InjectMouseUp(int.Parse(parts[1]), int.Parse(parts[2]), int.Parse(parts[3]));
+                {
+                    int x = int.Parse(parts[1]);
+                    int y = int.Parse(parts[2]);
+                    int button = int.Parse(parts[3]);
+                    NativeMethods.InjectMouseUp(x, y, button);
+                    Log($"Executing InjectMouseUp: X={x}, Y={y}, Button={button} (GetLastError: {Marshal.GetLastWin32Error()})");
+                }
                 break;
             case "w":
                 if (parts.Length >= 2)
-                    NativeMethods.InjectMouseWheel(int.Parse(parts[1]));
+                {
+                    int delta = int.Parse(parts[1]);
+                    NativeMethods.InjectMouseWheel(delta);
+                    Log($"Executing InjectMouseWheel: Delta={delta} (GetLastError: {Marshal.GetLastWin32Error()})");
+                }
                 break;
             case "k":
                 if (parts.Length >= 5)
@@ -185,14 +253,28 @@ class Program
                     bool alt = parts[3] == "1";
                     bool shift = parts[4] == "1";
                     NativeMethods.InjectRawKey(vk, ctrl, alt, shift);
+                    Log($"Executing InjectRawKey: VK={vk}, Ctrl={ctrl}, Alt={alt}, Shift={shift} (GetLastError: {Marshal.GetLastWin32Error()})");
                 }
                 else if (line.Length > 2)
                 {
-                    NativeMethods.InjectKey(line.Substring(2));
+                    string keys = line.Substring(2);
+                    NativeMethods.InjectKey(keys);
+                    Log($"Executing InjectKey: Keys='{keys}' (GetLastError: {Marshal.GetLastWin32Error()})");
                 }
                 break;
         }
     }
 
-    static void Log(string msg) => File.AppendAllText("C:\\Users\\Public\\itc_capture.log", $"[{DateTime.Now}] {msg}\n");
+    private static readonly object LogLock = new object();
+    static void Log(string msg)
+    {
+        lock (LogLock)
+        {
+            try
+            {
+                File.AppendAllText("C:\\Users\\Public\\itc_capture.log", $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {msg}\r\n");
+            }
+            catch { }
+        }
+    }
 }

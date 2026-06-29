@@ -1164,29 +1164,37 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('SecureDesktopInput', (inputJson) => {
+    console.log(`[SecureDesktopInput] Received SignalR event: ${inputJson}`);
     try {
       const input = JSON.parse(inputJson);
       if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
+        let msg = '';
         if (input.type === 'move') {
           const { rx, ry } = getScaledCoords(input.x, input.y);
-          secureDesktopSocket.write(`m ${rx} ${ry}\n`);
+          msg = `m ${rx} ${ry}\n`;
         } else if (input.type === 'click') {
           const { rx, ry } = getScaledCoords(input.x, input.y);
-          secureDesktopSocket.write(`c ${rx} ${ry} ${input.button}\n`);
+          msg = `c ${rx} ${ry} ${input.button}\n`;
         } else if (input.type === 'mousedown') {
           const { rx, ry } = getScaledCoords(input.x, input.y);
-          secureDesktopSocket.write(`d ${rx} ${ry} ${input.button}\n`);
+          msg = `d ${rx} ${ry} ${input.button}\n`;
         } else if (input.type === 'mouseup') {
           const { rx, ry } = getScaledCoords(input.x, input.y);
-          secureDesktopSocket.write(`u ${rx} ${ry} ${input.button}\n`);
+          msg = `u ${rx} ${ry} ${input.button}\n`;
         } else if (input.type === 'wheel') {
-          secureDesktopSocket.write(`w ${input.delta}\n`);
+          msg = `w ${input.delta}\n`;
         } else if (input.type === 'key') {
           const ctrlVal = input.ctrl ? 1 : 0;
           const altVal = input.alt ? 1 : 0;
           const shiftVal = input.shift ? 1 : 0;
-          secureDesktopSocket.write(`k ${input.keyCode} ${ctrlVal} ${altVal} ${shiftVal}\n`);
+          msg = `k ${input.keyCode} ${ctrlVal} ${altVal} ${shiftVal}\n`;
         }
+        if (msg) {
+          console.log(`[SecureDesktopInput] Writing to helper socket: ${msg.trim()}`);
+          secureDesktopSocket.write(msg);
+        }
+      } else {
+        console.warn('[SecureDesktopInput] Warning: secureDesktopSocket is not connected or is destroyed.');
       }
     } catch (e) {
       console.error('Error handling SecureDesktopInput:', e.message);

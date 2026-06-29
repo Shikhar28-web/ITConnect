@@ -32,17 +32,19 @@ public class Worker : BackgroundService
 
         _sessionHandler.OnSessionChanged += (eventId, sessionId) =>
         {
-            _logger.LogInformation($"Session event: {eventId} on session {sessionId}");
+            _logger.LogInformation($"[SESSION TRANSITION] Event: {eventId} ({(int)eventId}) detected for Session ID: {sessionId}");
             
             // Forward event to Electron client
             _ipcServer.SendSessionEvent(eventId, sessionId);
 
-            // Relaunch the capture exe in the active console/RDP session on logon/unlock/connect
+            // Relaunch the capture exe on unlock, logon, console connect, remote connect, and lock
             if (eventId == WTS_SESSION_EVENTS.WTS_SESSION_UNLOCK ||
                 eventId == WTS_SESSION_EVENTS.WTS_SESSION_LOGON ||
                 eventId == WTS_SESSION_EVENTS.WTS_CONSOLE_CONNECT ||
-                eventId == WTS_SESSION_EVENTS.WTS_REMOTE_CONNECT)
+                eventId == WTS_SESSION_EVENTS.WTS_REMOTE_CONNECT ||
+                eventId == WTS_SESSION_EVENTS.WTS_SESSION_LOCK)
             {
+                _logger.LogInformation($"[SESSION RE-TRIGGER] Re-triggering capture launcher for Session {sessionId} due to event: {eventId}");
                 _captureLauncher.LaunchInSession(sessionId);
             }
         };
@@ -51,7 +53,7 @@ public class Worker : BackgroundService
         int activeSession = WTSGetActiveConsoleSessionId();
         if (activeSession != -1)
         {
-            _logger.LogInformation($"Auto-detected active session {activeSession} on startup. Launching capture...");
+            _logger.LogInformation($"[STARTUP DETECT] Auto-detected active session {activeSession} on startup. Launching capture...");
             _captureLauncher.LaunchInSession(activeSession);
         }
 

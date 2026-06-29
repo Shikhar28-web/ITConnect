@@ -38,8 +38,104 @@ public static class NativeMethods
 
 
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool GetCursorPos(out POINT lpPoint);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int x;
+        public int y;
+    }
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    public static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    public static extern bool GetTokenInformation(
+        IntPtr TokenHandle,
+        int TokenInformationClass,
+        IntPtr TokenInformation,
+        uint TokenInformationLength,
+        out uint ReturnLength);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    public static extern IntPtr GetSidSubAuthorityCount(IntPtr pSid);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    public static extern IntPtr GetSidSubAuthority(IntPtr pSid, uint nSubAuthority);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr hObject);
+
+    public static string GetIntegrityLevel()
+    {
+        try
+        {
+            IntPtr hToken = IntPtr.Zero;
+            if (OpenProcessToken(System.Diagnostics.Process.GetCurrentProcess().Handle, 0x0008, out hToken)) // TOKEN_QUERY
+            {
+                try
+                {
+                    uint cbSize = 0;
+                    GetTokenInformation(hToken, 25, IntPtr.Zero, 0, out cbSize); // TokenIntegrityLevel = 25
+                    if (cbSize > 0)
+                    {
+                        IntPtr pTIL = Marshal.AllocHGlobal((int)cbSize);
+                        try
+                        {
+                            if (GetTokenInformation(hToken, 25, pTIL, cbSize, out cbSize))
+                            {
+                                IntPtr pSID = Marshal.ReadIntPtr(pTIL);
+                                IntPtr pSubAuthorityCount = GetSidSubAuthorityCount(pSID);
+                                int subAuthorityCount = Marshal.ReadByte(pSubAuthorityCount);
+                                IntPtr pSubAuthority = GetSidSubAuthority(pSID, (uint)(subAuthorityCount - 1));
+                                int rid = Marshal.ReadInt32(pSubAuthority);
+
+                                if (rid == 0x0000) return "Untrusted";
+                                if (rid == 0x1000) return "Low";
+                                if (rid == 0x2000) return "Medium";
+                                if (rid == 0x3000) return "High";
+                                if (rid == 0x4000) return "System";
+                                if (rid == 0x5000) return "Protected Process";
+                                return $"Integrity-0x{rid:X}";
+                            }
+                        }
+                        finally
+                        {
+                            Marshal.FreeHGlobal(pTIL);
+                        }
+                    }
+                }
+                finally
+                {
+                    CloseHandle(hToken);
+                }
+            }
+        }
+        catch { }
+        return "Unknown";
+    }
+
+    public static string GetProcessIdentityInfo()
+    {
+        try
+        {
+            var proc = System.Diagnostics.Process.GetCurrentProcess();
+            string procName = proc.ProcessName;
+            string userName = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+            int sessionId = proc.SessionId;
+            string integrity = GetIntegrityLevel();
+            return $"Process: {procName}, User: {userName}, SessionID: {sessionId}, Integrity: {integrity}";
+        }
+        catch (Exception ex)
+        {
+            return $"Identity Error: {ex.Message}";
+        }
+    }
 
     [DllImport("user32.dll")]
     public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, uint dwExtraInfo);
