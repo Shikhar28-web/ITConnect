@@ -15,10 +15,4 @@
     <PackageReference Include="Microsoft.Extensions.Logging.EventLog" Version="10.0.0-preview.4.25258.110" />
     <PackageReference Include="System.Drawing.Common" Version="10.0.0-preview.4.25258.110" />
   </ItemGroup>
-  <Target Name="CopyScreenCapture" AfterTargets="Publish">
-    <Copy SourceFiles="$(ProjectDir)..\..\native\ITComputer.ScreenCapture\bin\Release\net10.0-windows\win-x64\publish\ITComputer.ScreenCapture.exe" DestinationFolder="$(PublishDir)" ContinueOnError="true" />
-  </Target>
-  <Target Name="CopyScreenCaptureBuild" AfterTargets="Build">
-    <Copy SourceFiles="$(ProjectDir)..\..\native\ITComputer.ScreenCapture\bin\Debug\net10.0-windows\win-x64\ITComputer.ScreenCapture.exe" DestinationFolder="$(TargetDir)" ContinueOnError="true" />
-  </Target>
 </Project>
