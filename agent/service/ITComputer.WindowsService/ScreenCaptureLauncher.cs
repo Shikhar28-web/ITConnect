@@ -74,32 +74,14 @@ public class ScreenCaptureLauncher
         public uint dwThreadId;
     }
 
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern bool LookupPrivilegeValue(string? lpSystemName, string lpName, out LUID lpLuid);
-
     [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool AdjustTokenPrivileges(
+    private static extern bool SetTokenInformation(
         IntPtr TokenHandle,
-        bool DisableAllPrivileges,
-        ref TOKEN_PRIVILEGES NewState,
-        uint BufferLength,
-        IntPtr PreviousState,
-        IntPtr ReturnLength);
+        int TokenInformationClass,
+        ref int TokenInformation,
+        uint TokenInformationLength);
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct LUID
-    {
-        public uint LowPart;
-        public int HighPart;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct TOKEN_PRIVILEGES
-    {
-        public uint PrivilegeCount;
-        public LUID Luid;
-        public uint Attributes;
-    }
+    private const int TokenSessionId = 12;
 
     private readonly ILogger _logger;
     private Process? _captureProcess;
@@ -110,92 +92,55 @@ public class ScreenCaptureLauncher
         _logger = logger;
     }
 
-    private bool EnableDebugPrivilege()
+    private IntPtr GetSystemTokenForSession(int sessionId)
     {
-        IntPtr hToken = IntPtr.Zero;
+        IntPtr hCurrentToken = IntPtr.Zero;
+        IntPtr hNewToken = IntPtr.Zero;
         try
         {
-            Process currentProcess = Process.GetCurrentProcess();
-            if (!OpenProcessToken(currentProcess.Handle, 0x0020 | 0x0008, out hToken)) // TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY
+            // 1. Open the current service process token (which runs as SYSTEM)
+            IntPtr hProcess = Process.GetCurrentProcess().Handle;
+            if (!OpenProcessToken(hProcess, 0x0002 | 0x0004 | 0x0008 | 0x0010 | 0x0020, out hCurrentToken)) // TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY
             {
-                return false;
+                _logger.LogError($"OpenProcessToken failed for current service process. Error: {Marshal.GetLastWin32Error()}");
+                return IntPtr.Zero;
             }
 
-            LUID luid;
-            if (!LookupPrivilegeValue(null, "SeDebugPrivilege", out luid))
+            // 2. Duplicate the token to create a primary token
+            if (!DuplicateTokenEx(hCurrentToken, 0xf01ff, IntPtr.Zero, 2, 1, out hNewToken)) // TOKEN_ALL_ACCESS, SecurityImpersonation, TokenPrimary
             {
-                return false;
+                _logger.LogError($"DuplicateTokenEx failed. Error: {Marshal.GetLastWin32Error()}");
+                return IntPtr.Zero;
             }
 
-            TOKEN_PRIVILEGES tp = new TOKEN_PRIVILEGES();
-            tp.PrivilegeCount = 1;
-            tp.Luid = luid;
-            tp.Attributes = 0x00000002; // SE_PRIVILEGE_ENABLED
-
-            if (!AdjustTokenPrivileges(hToken, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero))
+            // 3. Set the session ID of the duplicated token to launch in target session
+            int targetSessionId = sessionId;
+            if (!SetTokenInformation(hNewToken, TokenSessionId, ref targetSessionId, sizeof(int)))
             {
-                return false;
+                _logger.LogError($"SetTokenInformation failed to set Session ID {sessionId}. Error: {Marshal.GetLastWin32Error()}");
+                CloseHandle(hNewToken);
+                return IntPtr.Zero;
             }
 
-            return Marshal.GetLastWin32Error() != 1443; // ERROR_NOT_ALL_ASSIGNED
+            _logger.LogInformation($"Successfully generated SYSTEM token for Session {sessionId} using SetTokenInformation.");
+            return hNewToken;
         }
-        catch
+        catch (Exception ex)
         {
-            return false;
+            _logger.LogError($"Failed to get SYSTEM token using token duplication: {ex.Message}");
+            if (hNewToken != IntPtr.Zero)
+            {
+                CloseHandle(hNewToken);
+            }
+            return IntPtr.Zero;
         }
         finally
         {
-            if (hToken != IntPtr.Zero)
+            if (hCurrentToken != IntPtr.Zero)
             {
-                CloseHandle(hToken);
+                CloseHandle(hCurrentToken);
             }
         }
-    }
-
-    private IntPtr GetSystemTokenForSession(int sessionId)
-    {
-        bool privEnabled = EnableDebugPrivilege();
-        _logger.LogInformation($"SeDebugPrivilege enablement status: {privEnabled}");
-
-        var processes = Process.GetProcessesByName("winlogon");
-        foreach (var p in processes)
-        {
-            if (p.SessionId == sessionId)
-            {
-                IntPtr hProcess = OpenProcess(0x0400 | 0x1000, false, p.Id); // PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION
-                if (hProcess == IntPtr.Zero)
-                {
-                    // Try with standard access if full query info fails
-                    hProcess = OpenProcess(0x0400, false, p.Id);
-                }
-
-                if (hProcess != IntPtr.Zero)
-                {
-                    if (OpenProcessToken(hProcess, 0x0002 | 0x0004 | 0x0008 | 0x0010 | 0x0020, out var hToken)) // TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY
-                    {
-                        CloseHandle(hProcess);
-                        IntPtr duplicatedToken = IntPtr.Zero;
-                        if (DuplicateTokenEx(hToken, 0xf01ff, IntPtr.Zero, 2, 1, out duplicatedToken)) // TOKEN_ALL_ACCESS, SecurityImpersonation, TokenPrimary
-                        {
-                            CloseHandle(hToken);
-                            return duplicatedToken;
-                        }
-                        _logger.LogWarning($"DuplicateTokenEx failed. Error: {Marshal.GetLastWin32Error()}");
-                        CloseHandle(hToken);
-                    }
-                    else
-                    {
-                        _logger.LogWarning($"OpenProcessToken failed for winlogon in session {sessionId}. Error: {Marshal.GetLastWin32Error()}");
-                        CloseHandle(hProcess);
-                    }
-                }
-                else
-                {
-                    _logger.LogWarning($"OpenProcess failed for winlogon PID {p.Id} in session {sessionId}. Error: {Marshal.GetLastWin32Error()}");
-                }
-            }
-        }
-        return IntPtr.Zero;
     }
 
     public void LaunchInSession(int sessionId)
