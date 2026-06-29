@@ -24,8 +24,8 @@ public class Worker : BackgroundService
         _logger.LogInformation("ITComputer Windows Service execution started");
 
         _sessionHandler = new SessionNotificationHandler(_logger);
-        _ipcServer = new NamedPipeIpcServer(_logger, _sessionHandler);
         _captureLauncher = new ScreenCaptureLauncher(_logger);
+        _ipcServer = new NamedPipeIpcServer(_logger, _sessionHandler, _captureLauncher);
 
         _sessionHandler.OnSessionChanged += (eventId, sessionId) =>
         {

@@ -18,9 +18,15 @@ public class NamedPipeIpcServer
     [DllImport("sas.dll", SetLastError = true)]
     private static extern void SendSAS(bool asUser);
 
-    public NamedPipeIpcServer(ILogger logger, SessionNotificationHandler handler)
+    [DllImport("kernel32.dll")]
+    private static extern uint WTSGetActiveConsoleSessionId();
+
+    private readonly ScreenCaptureLauncher _launcher;
+
+    public NamedPipeIpcServer(ILogger logger, SessionNotificationHandler handler, ScreenCaptureLauncher launcher)
     {
         _logger = logger;
+        _launcher = launcher;
     }
 
     public async Task StartAsync(CancellationToken ct)
@@ -60,6 +66,18 @@ public class NamedPipeIpcServer
                         {
                             SendSAS(false);
                             _logger.LogInformation("SendSAS completed.");
+
+                            // Immediately launch capture on the secure desktop
+                            uint sessionId = WTSGetActiveConsoleSessionId();
+                            if (sessionId != 0xFFFFFFFF)
+                            {
+                                _logger.LogInformation($"Launching capture helper on Winlogon for session {sessionId}...");
+                                _ = Task.Run(async () =>
+                                {
+                                    await Task.Delay(500); // Allow desktop transition to finalize
+                                    _launcher.LaunchInSession((int)sessionId, "winsta0\\Winlogon");
+                                });
+                            }
                         }
                         catch (Exception ex)
                         {
