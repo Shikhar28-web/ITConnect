@@ -80,6 +80,12 @@ app.whenReady().then(async () => {
       else console.log('Successfully enabled SoftwareSASGeneration in registry');
     });
 
+    // Automatically disable Secure Desktop for UAC prompts so they can be captured and clicked remotely
+    exec('reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v PromptOnSecureDesktop /t REG_DWORD /d 0 /f', (err) => {
+      if (err) console.warn('Failed to disable PromptOnSecureDesktop in registry:', err.message);
+      else console.log('Successfully disabled PromptOnSecureDesktop in registry');
+    });
+
     startSecureDesktopServer();
     launchSecureDesktopHelper();
     connectServicePipe();
