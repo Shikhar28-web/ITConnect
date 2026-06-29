@@ -444,6 +444,7 @@ function connectServicePipe() {
     if (!servicePipeConnected) {
       console.log('Connected to Windows Service Named Pipe.');
       servicePipeConnected = true;
+      stopLocalSecureDesktopHelper();
     }
   });
 
@@ -509,6 +510,10 @@ function requestSasFromService() {
 
 function launchSecureDesktopHelper() {
   if (secureDesktopHelperProcess) return;
+  if (servicePipeConnected) {
+    console.log('Windows Service is connected. Skipping local user-level screen capture helper.');
+    return;
+  }
 
   // Use native .NET ScreenCapture exe if available (preferred), else fall back to PS1
   const nativeExePath = path.join(__dirname, '../native/ITComputer.ScreenCapture/bin/Release/net10.0-windows/win-x64/ITComputer.ScreenCapture.exe');
@@ -539,6 +544,16 @@ function launchSecureDesktopHelper() {
       setTimeout(launchSecureDesktopHelper, 5000);
     }
   });
+}
+
+function stopLocalSecureDesktopHelper() {
+  console.log('Stopping local user-level secure desktop helper process...');
+  if (secureDesktopHelperProcess) {
+    try {
+      secureDesktopHelperProcess.kill();
+    } catch (e) {}
+    secureDesktopHelperProcess = null;
+  }
 }
 
 function stopSecureDesktopHelper() {

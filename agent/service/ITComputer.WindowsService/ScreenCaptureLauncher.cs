@@ -27,6 +27,21 @@ public class ScreenCaptureLauncher
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool DuplicateTokenEx(
+        IntPtr hExistingToken,
+        uint dwDesiredAccess,
+        IntPtr lpTokenAttributes,
+        int ImpersonationLevel,
+        int TokenType,
+        out IntPtr phNewToken);
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct STARTUPINFO
     {
@@ -68,6 +83,37 @@ public class ScreenCaptureLauncher
         _logger = logger;
     }
 
+    private IntPtr GetSystemTokenForSession(int sessionId)
+    {
+        var processes = Process.GetProcessesByName("winlogon");
+        foreach (var p in processes)
+        {
+            if (p.SessionId == sessionId)
+            {
+                IntPtr hProcess = OpenProcess(0x0400, false, p.Id); // PROCESS_QUERY_INFORMATION
+                if (hProcess != IntPtr.Zero)
+                {
+                    if (OpenProcessToken(hProcess, 0x0002 | 0x0004 | 0x0008 | 0x0010 | 0x0020, out var hToken)) // TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY
+                    {
+                        CloseHandle(hProcess);
+                        IntPtr duplicatedToken = IntPtr.Zero;
+                        if (DuplicateTokenEx(hToken, 0xf01ff, IntPtr.Zero, 2, 1, out duplicatedToken)) // TOKEN_ALL_ACCESS, SecurityImpersonation, TokenPrimary
+                        {
+                            CloseHandle(hToken);
+                            return duplicatedToken;
+                        }
+                        CloseHandle(hToken);
+                    }
+                    else
+                    {
+                        CloseHandle(hProcess);
+                    }
+                }
+            }
+        }
+        return IntPtr.Zero;
+    }
+
     public void LaunchInSession(int sessionId)
     {
         lock (_processLock)
@@ -91,10 +137,21 @@ public class ScreenCaptureLauncher
 
             try
             {
-                if (!WTSQueryUserToken((uint)sessionId, out var token))
+                IntPtr token = GetSystemTokenForSession(sessionId);
+                bool isSystem = token != IntPtr.Zero;
+
+                if (!isSystem)
                 {
-                    _logger.LogWarning($"WTSQueryUserToken failed for session {sessionId}. This is expected if no user is logged on.");
-                    return;
+                    _logger.LogWarning($"Failed to get SYSTEM token for session {sessionId}. Falling back to WTSQueryUserToken...");
+                    if (!WTSQueryUserToken((uint)sessionId, out token))
+                    {
+                        _logger.LogWarning($"WTSQueryUserToken failed for session {sessionId}. This is expected if no user is logged on.");
+                        return;
+                    }
+                }
+                else
+                {
+                    _logger.LogInformation($"Successfully retrieved SYSTEM token from winlogon for session {sessionId}");
                 }
 
                 var baseDir = AppContext.BaseDirectory;
@@ -119,7 +176,7 @@ public class ScreenCaptureLauncher
                     lpDesktop = "winsta0\\default"
                 };
 
-                _logger.LogInformation($"Launching capture exe in session {sessionId}: {exePath}");
+                _logger.LogInformation($"Launching capture exe in session {sessionId} (as {(isSystem ? "SYSTEM" : "USER")}): {exePath}");
                 bool ok = CreateProcessAsUser(
                     token,
                     exePath,

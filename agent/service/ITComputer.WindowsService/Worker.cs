@@ -14,6 +14,9 @@ public class Worker : BackgroundService
     private NamedPipeIpcServer? _ipcServer;
     private ScreenCaptureLauncher? _captureLauncher;
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern int WTSGetActiveConsoleSessionId();
+
     public Worker(ILogger<Worker> logger)
     {
         _logger = logger;
@@ -43,6 +46,14 @@ public class Worker : BackgroundService
                 _captureLauncher.LaunchInSession(sessionId);
             }
         };
+
+        // Launch in the currently active session on service startup
+        int activeSession = WTSGetActiveConsoleSessionId();
+        if (activeSession != -1)
+        {
+            _logger.LogInformation($"Auto-detected active session {activeSession} on startup. Launching capture...");
+            _captureLauncher.LaunchInSession(activeSession);
+        }
 
         await Task.WhenAll(
             _ipcServer.StartAsync(stoppingToken),
