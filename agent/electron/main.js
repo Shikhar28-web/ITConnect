@@ -86,8 +86,6 @@ app.whenReady().then(async () => {
       else console.log('Successfully disabled PromptOnSecureDesktop in registry');
     });
 
-    startSecureDesktopServer();
-    launchSecureDesktopHelper();
     connectServicePipe();
   }
   startInputWorker();
@@ -444,7 +442,14 @@ function connectServicePipe() {
     if (!servicePipeConnected) {
       console.log('Connected to Windows Service Named Pipe.');
       servicePipeConnected = true;
-      stopLocalSecureDesktopHelper();
+      try {
+        const sessId = require('child_process').execSync('powershell -Command "[System.Diagnostics.Process]::GetCurrentProcess().SessionId"').toString().trim();
+        console.log(`Sending session identification: session:${sessId}`);
+        client.write(`session:${sessId}\n`);
+      } catch (e) {
+        console.warn('Failed to determine session ID via PowerShell:', e.message);
+        client.write('session:unknown\n');
+      }
     }
   });
 
@@ -475,6 +480,27 @@ function connectServicePipe() {
 }
 
 function handleServiceEvent(line) {
+  if (line.startsWith('desktop:')) {
+    const desktopName = line.substring(8);
+    console.log(`Active desktop name relayed from service: ${desktopName}`);
+    if (signalRConnection && signalRConnection.state === 'Connected' && currentEngineerConnId) {
+      signalRConnection.invoke('SendActiveDesktop', currentEngineerConnId, desktopName).catch(err => {
+        console.error('Failed to send active desktop:', err.message);
+      });
+    }
+    return;
+  }
+
+  if (line.startsWith('frame:')) {
+    const base64Frame = line.substring(6);
+    if (signalRConnection && signalRConnection.state === 'Connected' && currentEngineerConnId) {
+      signalRConnection.invoke('SendSecureDesktopFrame', currentEngineerConnId, base64Frame).catch(err => {
+        console.error('Failed to send secure desktop frame:', err.message);
+      });
+    }
+    return;
+  }
+
   // Session change events from Windows Service
   const knownEvents = ['WTS_SESSION_LOCK', 'WTS_SESSION_UNLOCK', 'WTS_SESSION_LOGON',
     'WTS_SESSION_LOGOFF', 'WTS_CONSOLE_CONNECT', 'WTS_CONSOLE_DISCONNECT',
@@ -508,70 +534,8 @@ function requestSasFromService() {
   }
 }
 
-function launchSecureDesktopHelper() {
-  if (secureDesktopHelperProcess) return;
-  if (servicePipeConnected) {
-    console.log('Windows Service is connected. Skipping local user-level screen capture helper.');
-    return;
-  }
-
-  // Use native .NET ScreenCapture exe if available (preferred), else fall back to PS1
-  const nativeExePath = path.join(__dirname, '../native/ITComputer.ScreenCapture/bin/Release/net10.0-windows/win-x64/ITComputer.ScreenCapture.exe');
-  const ps1Path = path.join(__dirname, 'secure_desktop_helper.ps1');
-  const port = 59300;
-
-  if (fs.existsSync(nativeExePath)) {
-    console.log('Launching native DXGI screen capture process...');
-    secureDesktopHelperProcess = spawn(nativeExePath, [port.toString()]);
-  } else {
-    console.log('Native capture not found, falling back to PowerShell helper...');
-    secureDesktopHelperProcess = spawn('powershell', [
-      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-      '-File', ps1Path, '-Port', port.toString()
-    ]);
-  }
-
-  secureDesktopHelperProcess.on('error', (spawnErr) => {
-    console.error('Failed to spawn helper child process:', spawnErr);
-    secureDesktopHelperProcess = null;
-  });
-
-  secureDesktopHelperProcess.on('close', (code) => {
-    console.log(`Secure desktop helper child process exited with code ${code}`);
-    secureDesktopHelperProcess = null;
-    if (!app.isQuitting) {
-      console.log('Secure desktop helper child process exited. Restarting in 5 seconds...');
-      setTimeout(launchSecureDesktopHelper, 5000);
-    }
-  });
-}
-
-function stopLocalSecureDesktopHelper() {
-  console.log('Stopping local user-level secure desktop helper process...');
-  if (secureDesktopHelperProcess) {
-    try {
-      secureDesktopHelperProcess.kill();
-    } catch (e) {}
-    secureDesktopHelperProcess = null;
-  }
-}
-
 function stopSecureDesktopHelper() {
-  console.log('Stopping secure desktop helper...');
-  if (secureDesktopHelperProcess) {
-    secureDesktopHelperProcess.kill();
-    secureDesktopHelperProcess = null;
-  }
-
-  if (secureDesktopSocket) {
-    secureDesktopSocket.destroy();
-    secureDesktopSocket = null;
-  }
-
-  if (secureDesktopServer) {
-    secureDesktopServer.close();
-    secureDesktopServer = null;
-  }
+  // Deprecated - managed by service
 }
 
 // Helper to get HWND as a safe string (handles 64-bit and 32-bit platforms)
@@ -1167,34 +1131,34 @@ async function connectSignalR() {
     console.log(`[SecureDesktopInput] Received SignalR event: ${inputJson}`);
     try {
       const input = JSON.parse(inputJson);
-      if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
-        let msg = '';
-        if (input.type === 'move') {
-          const { rx, ry } = getScaledCoords(input.x, input.y);
-          msg = `m ${rx} ${ry}\n`;
-        } else if (input.type === 'click') {
-          const { rx, ry } = getScaledCoords(input.x, input.y);
-          msg = `c ${rx} ${ry} ${input.button}\n`;
-        } else if (input.type === 'mousedown') {
-          const { rx, ry } = getScaledCoords(input.x, input.y);
-          msg = `d ${rx} ${ry} ${input.button}\n`;
-        } else if (input.type === 'mouseup') {
-          const { rx, ry } = getScaledCoords(input.x, input.y);
-          msg = `u ${rx} ${ry} ${input.button}\n`;
-        } else if (input.type === 'wheel') {
-          msg = `w ${input.delta}\n`;
-        } else if (input.type === 'key') {
-          const ctrlVal = input.ctrl ? 1 : 0;
-          const altVal = input.alt ? 1 : 0;
-          const shiftVal = input.shift ? 1 : 0;
-          msg = `k ${input.keyCode} ${ctrlVal} ${altVal} ${shiftVal}\n`;
-        }
-        if (msg) {
-          console.log(`[SecureDesktopInput] Writing to helper socket: ${msg.trim()}`);
+      let msg = '';
+      if (input.type === 'move') {
+        msg = `m ${input.x} ${input.y}\n`;
+      } else if (input.type === 'click') {
+        msg = `c ${input.x} ${input.y} ${input.button}\n`;
+      } else if (input.type === 'mousedown') {
+        msg = `d ${input.x} ${input.y} ${input.button}\n`;
+      } else if (input.type === 'mouseup') {
+        msg = `u ${input.x} ${input.y} ${input.button}\n`;
+      } else if (input.type === 'wheel') {
+        msg = `w ${input.delta}\n`;
+      } else if (input.type === 'key') {
+        const ctrlVal = input.ctrl ? 1 : 0;
+        const altVal = input.alt ? 1 : 0;
+        const shiftVal = input.shift ? 1 : 0;
+        msg = `k ${input.keyCode} ${ctrlVal} ${altVal} ${shiftVal}\n`;
+      }
+
+      if (msg) {
+        if (servicePipe && !servicePipe.destroyed) {
+          console.log(`[SecureDesktopInput] Relaying to service pipe: input:${msg.trim()}`);
+          servicePipe.write(`input:${msg}`);
+        } else if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
+          console.log(`[SecureDesktopInput] Writing to legacy helper socket: ${msg.trim()}`);
           secureDesktopSocket.write(msg);
+        } else {
+          console.warn('[SecureDesktopInput] No channel connected (servicePipe and secureDesktopSocket are unavailable).');
         }
-      } else {
-        console.warn('[SecureDesktopInput] Warning: secureDesktopSocket is not connected or is destroyed.');
       }
     } catch (e) {
       console.error('Error handling SecureDesktopInput:', e.message);
