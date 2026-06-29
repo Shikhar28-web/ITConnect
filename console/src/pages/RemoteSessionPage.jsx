@@ -818,6 +818,13 @@ function RemoteSessionPage() {
                       <div className="tools-dropdown-section-title">⚡ System State & Power</div>
                       <div className="tools-grid">
                         <button className="tools-item-btn danger" onClick={() => {
+                          signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'cad');
+                          toast.info('Sending Ctrl+Alt+Delete...');
+                        }}>
+                          <span className="tools-item-icon">🎹</span>
+                          <span className="tools-item-text">Send Ctrl+Alt+Del</span>
+                        </button>
+                        <button className="tools-item-btn danger" onClick={() => {
                           signalRService.sendPowerCommand(parseInt(deviceId), parseInt(sessionId), 'lock');
                           toast.info('Toggling Workspace Lock overlay...');
                         }}>

@@ -206,8 +206,6 @@ body {
   min-width: 18px;
   text-align: center;
 }
-
-/* ─── Topbar ──────────────────────────────────────────────────────────────── */
 .topbar {
   height: var(--topbar-height);
   background: var(--bg-secondary);
