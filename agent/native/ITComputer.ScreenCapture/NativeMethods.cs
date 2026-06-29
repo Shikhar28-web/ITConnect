@@ -55,10 +55,24 @@ public static class NativeMethods
     public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
     public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
     public const uint MOUSEEVENTF_WHEEL = 0x0800;
+    public const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
+
+    public static void InjectMouseMove(int x, int y)
+    {
+        uint dx = (uint)Math.Round((double)x * 65535.0 / 10000.0);
+        uint dy = (uint)Math.Round((double)y * 65535.0 / 10000.0);
+        mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, dx, dy, 0, 0);
+    }
 
     public static void InjectMouseClick(int x, int y, int button)
     {
-        SetCursorPos(x, y);
+        uint dx = (uint)Math.Round((double)x * 65535.0 / 10000.0);
+        uint dy = (uint)Math.Round((double)y * 65535.0 / 10000.0);
+
+        // Move to the position absolute first
+        mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, dx, dy, 0, 0);
+        System.Threading.Thread.Sleep(10);
+
         uint down = MOUSEEVENTF_LEFTDOWN;
         uint up = MOUSEEVENTF_LEFTUP;
         if (button == 2)
@@ -71,27 +85,37 @@ public static class NativeMethods
             down = MOUSEEVENTF_MIDDLEDOWN;
             up = MOUSEEVENTF_MIDDLEUP;
         }
-        mouse_event(down, 0, 0, 0, 0);
+        mouse_event(down | MOUSEEVENTF_ABSOLUTE, dx, dy, 0, 0);
         System.Threading.Thread.Sleep(15);
-        mouse_event(up, 0, 0, 0, 0);
+        mouse_event(up | MOUSEEVENTF_ABSOLUTE, dx, dy, 0, 0);
     }
 
     public static void InjectMouseDown(int x, int y, int button)
     {
-        SetCursorPos(x, y);
+        uint dx = (uint)Math.Round((double)x * 65535.0 / 10000.0);
+        uint dy = (uint)Math.Round((double)y * 65535.0 / 10000.0);
+
+        mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, dx, dy, 0, 0);
+        System.Threading.Thread.Sleep(10);
+
         uint down = MOUSEEVENTF_LEFTDOWN;
         if (button == 2) down = MOUSEEVENTF_RIGHTDOWN;
         else if (button == 1) down = MOUSEEVENTF_MIDDLEDOWN;
-        mouse_event(down, 0, 0, 0, 0);
+        mouse_event(down | MOUSEEVENTF_ABSOLUTE, dx, dy, 0, 0);
     }
 
     public static void InjectMouseUp(int x, int y, int button)
     {
-        SetCursorPos(x, y);
+        uint dx = (uint)Math.Round((double)x * 65535.0 / 10000.0);
+        uint dy = (uint)Math.Round((double)y * 65535.0 / 10000.0);
+
+        mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, dx, dy, 0, 0);
+        System.Threading.Thread.Sleep(10);
+
         uint up = MOUSEEVENTF_LEFTUP;
         if (button == 2) up = MOUSEEVENTF_RIGHTUP;
         else if (button == 1) up = MOUSEEVENTF_MIDDLEUP;
-        mouse_event(up, 0, 0, 0, 0);
+        mouse_event(up | MOUSEEVENTF_ABSOLUTE, dx, dy, 0, 0);
     }
 
     public static void InjectMouseWheel(int delta)

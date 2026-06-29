@@ -92,7 +92,7 @@ class Program
 
     static string GetActiveDesktopName()
     {
-        IntPtr hDesk = NativeMethods.OpenInputDesktop(0, false, 0x0181);
+        IntPtr hDesk = NativeMethods.OpenInputDesktop(0, false, 0x01FF);
         if (hDesk == IntPtr.Zero) return "unknown";
         try
         {
@@ -127,7 +127,7 @@ class Program
         {
             try
             {
-                IntPtr hDesk = NativeMethods.OpenInputDesktop(0, false, 0x0181);
+                IntPtr hDesk = NativeMethods.OpenInputDesktop(0, false, 0x01FF);
                 if (hDesk != IntPtr.Zero)
                 {
                     bool setDeskOk = NativeMethods.SetThreadDesktop(hDesk);
@@ -159,7 +159,7 @@ class Program
         {
             case "m":
                 if (parts.Length >= 3)
-                    NativeMethods.SetCursorPos(int.Parse(parts[1]), int.Parse(parts[2]));
+                    NativeMethods.InjectMouseMove(int.Parse(parts[1]), int.Parse(parts[2]));
                 break;
             case "c":
                 if (parts.Length >= 4)

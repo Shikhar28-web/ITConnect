@@ -15,4 +15,10 @@
     <PackageReference Include="Microsoft.Extensions.Logging.EventLog" Version="10.0.0-preview.4.25258.110" />
     <PackageReference Include="System.Drawing.Common" Version="10.0.0-preview.4.25258.110" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\native\ITComputer.ScreenCapture\bin\Release\net10.0-windows\win-x64\publish\ITComputer.ScreenCapture.exe" Link="ITComputer.ScreenCapture.exe">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
 </Project>
