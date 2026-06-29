@@ -123,60 +123,74 @@ class Program
 
     static void ProcessInputCommand(string line)
     {
-        try
+        var thread = new System.Threading.Thread(() =>
         {
-            // Switch thread desktop before injecting input
-            IntPtr hDesk = NativeMethods.OpenInputDesktop(0, false, 0x0181);
-            if (hDesk != IntPtr.Zero)
+            try
             {
-                NativeMethods.SetThreadDesktop(hDesk);
-                NativeMethods.CloseDesktop(hDesk);
+                IntPtr hDesk = NativeMethods.OpenInputDesktop(0, false, 0x0181);
+                if (hDesk != IntPtr.Zero)
+                {
+                    bool setDeskOk = NativeMethods.SetThreadDesktop(hDesk);
+                    if (!setDeskOk)
+                    {
+                        Log($"SetThreadDesktop failed for injection thread. Error: {Marshal.GetLastWin32Error()}");
+                    }
+                    NativeMethods.CloseDesktop(hDesk);
+                }
+
+                ExecuteCommandInternal(line);
             }
-
-            var parts = line.Split(' ');
-            if (parts.Length == 0) return;
-
-            switch (parts[0])
+            catch (Exception ex)
             {
-                case "m":
-                    if (parts.Length >= 3)
-                        NativeMethods.SetCursorPos(int.Parse(parts[1]), int.Parse(parts[2]));
-                    break;
-                case "c":
-                    if (parts.Length >= 4)
-                        NativeMethods.InjectMouseClick(int.Parse(parts[1]), int.Parse(parts[2]), int.Parse(parts[3]));
-                    break;
-                case "d":
-                    if (parts.Length >= 4)
-                        NativeMethods.InjectMouseDown(int.Parse(parts[1]), int.Parse(parts[2]), int.Parse(parts[3]));
-                    break;
-                case "u":
-                    if (parts.Length >= 4)
-                        NativeMethods.InjectMouseUp(int.Parse(parts[1]), int.Parse(parts[2]), int.Parse(parts[3]));
-                    break;
-                case "w":
-                    if (parts.Length >= 2)
-                        NativeMethods.InjectMouseWheel(int.Parse(parts[1]));
-                    break;
-                case "k":
-                    if (parts.Length >= 5)
-                    {
-                        int vk = int.Parse(parts[1]);
-                        bool ctrl = parts[2] == "1";
-                        bool alt = parts[3] == "1";
-                        bool shift = parts[4] == "1";
-                        NativeMethods.InjectRawKey(vk, ctrl, alt, shift);
-                    }
-                    else if (line.Length > 2)
-                    {
-                        NativeMethods.InjectKey(line.Substring(2));
-                    }
-                    break;
+                Log($"Injection thread failed: {ex.Message}");
             }
-        }
-        catch (Exception ex)
+        });
+        thread.SetApartmentState(System.Threading.ApartmentState.STA);
+        thread.Start();
+        thread.Join(); // Block main thread until the input is injected
+    }
+
+    static void ExecuteCommandInternal(string line)
+    {
+        var parts = line.Split(' ');
+        if (parts.Length == 0) return;
+
+        switch (parts[0])
         {
-            Log($"Process input command failed: {ex.Message} for line: {line}");
+            case "m":
+                if (parts.Length >= 3)
+                    NativeMethods.SetCursorPos(int.Parse(parts[1]), int.Parse(parts[2]));
+                break;
+            case "c":
+                if (parts.Length >= 4)
+                    NativeMethods.InjectMouseClick(int.Parse(parts[1]), int.Parse(parts[2]), int.Parse(parts[3]));
+                break;
+            case "d":
+                if (parts.Length >= 4)
+                    NativeMethods.InjectMouseDown(int.Parse(parts[1]), int.Parse(parts[2]), int.Parse(parts[3]));
+                break;
+            case "u":
+                if (parts.Length >= 4)
+                    NativeMethods.InjectMouseUp(int.Parse(parts[1]), int.Parse(parts[2]), int.Parse(parts[3]));
+                break;
+            case "w":
+                if (parts.Length >= 2)
+                    NativeMethods.InjectMouseWheel(int.Parse(parts[1]));
+                break;
+            case "k":
+                if (parts.Length >= 5)
+                {
+                    int vk = int.Parse(parts[1]);
+                    bool ctrl = parts[2] == "1";
+                    bool alt = parts[3] == "1";
+                    bool shift = parts[4] == "1";
+                    NativeMethods.InjectRawKey(vk, ctrl, alt, shift);
+                }
+                else if (line.Length > 2)
+                {
+                    NativeMethods.InjectKey(line.Substring(2));
+                }
+                break;
         }
     }
 
