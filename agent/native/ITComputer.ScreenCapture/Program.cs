@@ -186,7 +186,6 @@ class Program
                 Log($"Injection thread failed: {ex.Message}\n{ex.StackTrace}");
             }
         });
-        thread.SetApartmentState(System.Threading.ApartmentState.STA);
         thread.Start();
         thread.Join(); // Block main thread until the input is injected
     }
