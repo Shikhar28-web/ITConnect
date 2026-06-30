@@ -1212,17 +1212,13 @@ async function connectSignalR() {
       if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
         let msg = '';
         if (input.type === 'move') {
-          const { rx, ry } = getScaledCoords(input.x, input.y);
-          msg = `m ${rx} ${ry}\n`;
+          msg = `m ${input.x} ${input.y}\n`;
         } else if (input.type === 'click') {
-          const { rx, ry } = getScaledCoords(input.x, input.y);
-          msg = `c ${rx} ${ry} ${input.button}\n`;
+          msg = `c ${input.x} ${input.y} ${input.button}\n`;
         } else if (input.type === 'mousedown') {
-          const { rx, ry } = getScaledCoords(input.x, input.y);
-          msg = `d ${rx} ${ry} ${input.button}\n`;
+          msg = `d ${input.x} ${input.y} ${input.button}\n`;
         } else if (input.type === 'mouseup') {
-          const { rx, ry } = getScaledCoords(input.x, input.y);
-          msg = `u ${rx} ${ry} ${input.button}\n`;
+          msg = `u ${input.x} ${input.y} ${input.button}\n`;
         } else if (input.type === 'wheel') {
           msg = `w ${input.delta}\n`;
         } else if (input.type === 'key') {

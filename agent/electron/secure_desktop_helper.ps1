@@ -222,13 +222,21 @@ while ($true) {
 
                         $parts = $line.Split(' ')
                         if ($parts[0] -eq 'm') {
-                            [Win32]::Move([int]$parts[1], [int]$parts[2])
+                            $rx = [Math]::Round(([int]$parts[1] / 10000.0) * ($width - 1))
+                            $ry = [Math]::Round(([int]$parts[2] / 10000.0) * ($height - 1))
+                            [Win32]::Move($rx, $ry)
                         } elseif ($parts[0] -eq 'c') {
-                            [Win32]::Click([int]$parts[1], [int]$parts[2], [int]$parts[3])
+                            $rx = [Math]::Round(([int]$parts[1] / 10000.0) * ($width - 1))
+                            $ry = [Math]::Round(([int]$parts[2] / 10000.0) * ($height - 1))
+                            [Win32]::Click($rx, $ry, [int]$parts[3])
                         } elseif ($parts[0] -eq 'd') {
-                            [Win32]::MouseDown([int]$parts[1], [int]$parts[2], [int]$parts[3])
+                            $rx = [Math]::Round(([int]$parts[1] / 10000.0) * ($width - 1))
+                            $ry = [Math]::Round(([int]$parts[2] / 10000.0) * ($height - 1))
+                            [Win32]::MouseDown($rx, $ry, [int]$parts[3])
                         } elseif ($parts[0] -eq 'u') {
-                            [Win32]::MouseUp([int]$parts[1], [int]$parts[2], [int]$parts[3])
+                            $rx = [Math]::Round(([int]$parts[1] / 10000.0) * ($width - 1))
+                            $ry = [Math]::Round(([int]$parts[2] / 10000.0) * ($height - 1))
+                            [Win32]::MouseUp($rx, $ry, [int]$parts[3])
                         } elseif ($parts[0] -eq 'w') {
                             [Win32]::MouseWheel([int]$parts[1])
                         } elseif ($parts[0] -eq 'k') {
