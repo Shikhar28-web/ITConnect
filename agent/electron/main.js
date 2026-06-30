@@ -43,7 +43,6 @@ let mainWindow = null;
 let blackoutWindows = [];
 let blackoutAlwaysOnTopInterval = null;
 let blackoutIgnoreTimeout = null;
-let isBlackoutEnabled = false;
 let lockWindows = [];
 let lockActive = false;
 let privacyModeActive = false;
@@ -283,8 +282,6 @@ public class Win32Input {
     [DllImport("user32.dll")]
     public static extern uint SetWindowDisplayAffinity(IntPtr hwnd, uint dwAffinity);
 
-
-
     public const uint SPI_SETCURSORS = 0x0057;
     public const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
 
@@ -338,8 +335,6 @@ public class Win32Input {
 }
 "@
 Add-Type -AssemblyName System.Windows.Forms
-
-
 
 while ($line = [Console]::ReadLine()) {
     try {
@@ -399,9 +394,11 @@ function startSecureDesktopServer() {
   secureDesktopServer = net.createServer((socket) => {
     console.log('Secure desktop helper connected via TCP');
     secureDesktopSocket = socket;
-    
-    // Sync current blackout state immediately on connection
-    socket.write(isBlackoutEnabled ? "b 1\n" : "b 0\n");
+
+    if (privacyModeActive) {
+      console.log('[Blackout] Active secure desktop helper connected; immediately sending blackout command (b 1).');
+      socket.write("b 1\n");
+    }
 
     socket.setEncoding('utf8');
 
@@ -1140,19 +1137,16 @@ async function connectSignalR() {
   };
 
   signalRConnection.on('MouseMove', async (x, y) => {
-    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     await injectMouseMove(rx, ry);
   });
 
   signalRConnection.on('MouseClick', async (x, y, button) => {
-    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     await injectMouseClick(rx, ry, button);
   });
 
   signalRConnection.on('MouseDown', async (x, y, button) => {
-    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`d ${rx} ${ry} ${button}\n`);
@@ -1160,7 +1154,6 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('MouseUp', async (x, y, button) => {
-    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`u ${rx} ${ry} ${button}\n`);
@@ -1168,7 +1161,6 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('MouseWheel', async (delta) => {
-    tempAllowClickThrough();
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`w ${delta}\n`);
     }
@@ -1179,28 +1171,27 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('SetBlackout', (enabled, progressInfo) => {
-    isBlackoutEnabled = enabled;
+    privacyModeActive = enabled;
+    console.log(`[Blackout] SetBlackout SignalR event: enabled=${enabled}`);
     if (enabled) {
       createBlackoutWindow(progressInfo);
-      if (process.platform === 'win32') {
-        if (inputWorker && !inputWorker.killed) {
-          inputWorker.stdin.write("b 1\n");
-          inputWorker.stdin.write("h\n");
-        }
-        if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
-          secureDesktopSocket.write("b 1\n");
-        }
+      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+        inputWorker.stdin.write("b 1\n");
+        inputWorker.stdin.write("h\n");
+      }
+      if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
+        console.log('[Blackout] Notifying secure desktop helper process to enable blackout.');
+        secureDesktopSocket.write("b 1\n");
       }
     } else {
       destroyBlackoutWindow();
-      if (process.platform === 'win32') {
-        if (inputWorker && !inputWorker.killed) {
-          inputWorker.stdin.write("b 0\n");
-          inputWorker.stdin.write("r\n");
-        }
-        if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
-          secureDesktopSocket.write("b 0\n");
-        }
+      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
+        inputWorker.stdin.write("b 0\n");
+        inputWorker.stdin.write("r\n");
+      }
+      if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
+        console.log('[Blackout] Notifying secure desktop helper process to disable blackout.');
+        secureDesktopSocket.write("b 0\n");
       }
     }
   });

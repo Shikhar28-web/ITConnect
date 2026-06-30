@@ -6,6 +6,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Text;
 using System.Threading;
+using System.Windows.Forms;
 
 namespace ITComputer.ScreenCapture;
 
@@ -73,6 +74,13 @@ class Program
                 {
                     writer.WriteLine($"desktop:{desktopName}");
                     lastDesktopName = desktopName;
+
+                    if (BlackoutWindow.IsActive)
+                    {
+                        Log($"[Desktop Transition] Active desktop changed to {desktopName} while blackout is enabled. Recreating blackout window...");
+                        BlackoutWindow.HideBlackout();
+                        BlackoutWindow.ShowBlackout();
+                    }
                 }
 
                 byte[] frame = CaptureCurrentDesktop();
@@ -128,9 +136,10 @@ class Program
 
         var thread = new System.Threading.Thread(() =>
         {
+            IntPtr hDesk = IntPtr.Zero;
             try
             {
-                IntPtr hDesk = NativeMethods.OpenInputDesktop(0, false, 0x01FF);
+                hDesk = NativeMethods.OpenInputDesktop(0, false, 0x01FF);
                 if (hDesk != IntPtr.Zero)
                 {
                     var sb = new StringBuilder(256);
@@ -150,7 +159,6 @@ class Program
                     {
                         Log($"SetThreadDesktop failed. Error: {Marshal.GetLastWin32Error()}");
                     }
-                    NativeMethods.CloseDesktop(hDesk);
                 }
                 else
                 {
@@ -184,6 +192,13 @@ class Program
             catch (Exception ex)
             {
                 Log($"Injection thread failed: {ex.Message}\n{ex.StackTrace}");
+            }
+            finally
+            {
+                if (hDesk != IntPtr.Zero)
+                {
+                    NativeMethods.CloseDesktop(hDesk);
+                }
             }
         });
         thread.Start();
@@ -244,14 +259,6 @@ class Program
                     Log($"Executing InjectMouseWheel: Delta={delta} (GetLastError: {Marshal.GetLastWin32Error()})");
                 }
                 break;
-            case "b":
-                if (parts.Length >= 2)
-                {
-                    bool enable = parts[1] == "1";
-                    SetMonitorBlackout(enable);
-                    Log($"Executing SetMonitorBlackout: Enable={enable}");
-                }
-                break;
             case "k":
                 if (parts.Length >= 5)
                 {
@@ -269,34 +276,26 @@ class Program
                     Log($"Executing InjectKey: Keys='{keys}' (GetLastError: {Marshal.GetLastWin32Error()})");
                 }
                 break;
-        }
-    }
-
-    private static bool _blackoutActive = false;
-    private static System.Threading.Thread? _blackoutThread = null;
-
-    public static void SetMonitorBlackout(bool enable)
-    {
-        _blackoutActive = enable;
-        if (enable)
-        {
-            if (_blackoutThread == null || !_blackoutThread.IsAlive)
-            {
-                _blackoutThread = new System.Threading.Thread(() =>
+            case "b":
+                if (parts.Length >= 2)
                 {
-                    while (_blackoutActive)
+                    bool enable = parts[1] == "1";
+                    Log($"Executing SetBlackout: {enable} (GetLastError: {Marshal.GetLastWin32Error()})");
+                    if (enable)
                     {
-                        NativeMethods.SendMessage((IntPtr)0xFFFF, 0x0112, (IntPtr)0xF170, (IntPtr)2);
-                        System.Threading.Thread.Sleep(1000);
+                        BlackoutWindow.ShowBlackout();
                     }
-                }) { IsBackground = true };
-                _blackoutThread.Start();
-            }
+                    else
+                    {
+                        BlackoutWindow.HideBlackout();
+                    }
+                }
+                break;
         }
     }
 
     private static readonly object LogLock = new object();
-    static void Log(string msg)
+    public static void Log(string msg)
     {
         lock (LogLock)
         {
@@ -306,5 +305,126 @@ class Program
             }
             catch { }
         }
+    }
+}
+
+public class BlackoutWindow
+{
+    private static Form? _blackoutForm;
+    private static Thread? _windowThread;
+    public static bool IsActive { get; private set; }
+
+    public static void ShowBlackout()
+    {
+        IsActive = true;
+        if (_blackoutForm != null) return;
+
+        _windowThread = new Thread(() =>
+        {
+            try
+            {
+                Program.Log("[Blackout] Starting blackout window thread...");
+                
+                // Attach thread to active input desktop
+                IntPtr hDesk = NativeMethods.OpenInputDesktop(0, false, 0x01FF);
+                if (hDesk != IntPtr.Zero)
+                {
+                    bool ok = NativeMethods.SetThreadDesktop(hDesk);
+                    Program.Log($"[Blackout] SetThreadDesktop on input desktop: {ok}");
+                    NativeMethods.CloseDesktop(hDesk);
+                }
+
+                _blackoutForm = new Form
+                {
+                    BackColor = Color.Black,
+                    FormBorderStyle = FormBorderStyle.None,
+                    WindowState = FormWindowState.Maximized,
+                    TopMost = true,
+                    ShowInTaskbar = false,
+                    StartPosition = FormStartPosition.Manual
+                };
+
+                // Cover virtual screen bounds (all monitors)
+                var bounds = SystemInformation.VirtualScreen;
+                _blackoutForm.Bounds = bounds;
+
+                _blackoutForm.Load += (s, e) =>
+                {
+                    // Exclude from capture so admin can see through the blackout window
+                    bool affOk = NativeMethods.SetWindowDisplayAffinity(_blackoutForm.Handle, 0x00000011); // WDA_EXCLUDEFROMCAPTURE
+                    Program.Log($"[Blackout] SetWindowDisplayAffinity returned: {affOk}");
+                };
+
+                var label = new Label
+                {
+                    Text = "Windows",
+                    Font = new Font("Segoe UI", 48, FontStyle.Bold),
+                    ForeColor = Color.White,
+                    AutoSize = true,
+                };
+                _blackoutForm.Controls.Add(label);
+
+                var timer = new System.Windows.Forms.Timer { Interval = 16 };
+                int x = 80, y = 80;
+                int vx = 3, vy = 2;
+                Color[] colors = { Color.White, Color.DeepSkyBlue, Color.MediumPurple, Color.Cyan, Color.Pink, Color.LightGreen };
+                int colorIndex = 0;
+
+                timer.Tick += (sender, args) =>
+                {
+                    if (_blackoutForm == null || _blackoutForm.IsDisposed) return;
+                    x += vx;
+                    y += vy;
+
+                    bool bounced = false;
+                    if (x + label.Width >= _blackoutForm.Width) { x = _blackoutForm.Width - label.Width; vx = -Math.Abs(vx); bounced = true; }
+                    if (x <= 0) { x = 0; vx = Math.Abs(vx); bounced = true; }
+                    if (y + label.Height >= _blackoutForm.Height) { y = _blackoutForm.Height - label.Height; vy = -Math.Abs(vy); bounced = true; }
+                    if (y <= 0) { y = 0; vy = Math.Abs(vy); bounced = true; }
+
+                    if (bounced)
+                    {
+                        colorIndex = (colorIndex + 1) % colors.Length;
+                        label.ForeColor = colors[colorIndex];
+                    }
+
+                    label.Left = x;
+                    label.Top = y;
+                };
+                timer.Start();
+
+                Program.Log("[Blackout] Running form message loop...");
+                Application.Run(_blackoutForm);
+            }
+            catch (Exception ex)
+            {
+                Program.Log($"[Blackout] Window thread failed: {ex.Message}");
+            }
+        })
+        { IsBackground = true };
+        _windowThread.Start();
+    }
+
+    public static void HideBlackout()
+    {
+        IsActive = false;
+        if (_blackoutForm != null)
+        {
+            try
+            {
+                Program.Log("[Blackout] Closing blackout form...");
+                _blackoutForm.Invoke(new Action(() =>
+                {
+                    _blackoutForm.Close();
+                    _blackoutForm.Dispose();
+                }));
+            }
+            catch (Exception ex)
+            {
+                Program.Log($"[Blackout] Failed to close form programmatically: {ex.Message}");
+            }
+            _blackoutForm = null;
+        }
+        _windowThread = null;
     }
 }

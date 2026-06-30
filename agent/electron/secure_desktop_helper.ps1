@@ -74,9 +74,6 @@ public class Win32 {
     [DllImport("user32.dll")]
     public static extern bool BlockInput(bool fBlockIt);
 
-    [DllImport("user32.dll")]
-    public static extern int SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
-
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
     public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
@@ -205,18 +202,6 @@ while ($true) {
         $writer = New-Object System.IO.StreamWriter($stream)
         $writer.AutoFlush = $true
 
-        $global:blackoutActive = $false
-        $blackoutThread = [System.Threading.Thread]::new({
-            while ($true) {
-                if ($global:blackoutActive) {
-                    [Win32]::SendMessage([IntPtr]0xFFFF, 0x0112, [IntPtr]0xF170, [IntPtr]2) | Out-Null
-                }
-                [System.Threading.Thread]::Sleep(1000)
-            }
-        })
-        $blackoutThread.IsBackground = $true
-        $blackoutThread.Start()
-
         # Get primary screen size
         $screen = [System.Windows.Forms.Screen]::PrimaryScreen
         $width = $screen.Bounds.Width
@@ -257,8 +242,6 @@ while ($true) {
                         } elseif ($parts[0] -eq 'k') {
                             $keyStr = $line.Substring(2)
                             [System.Windows.Forms.SendKeys]::SendWait($keyStr)
-                        } elseif ($parts[0] -eq 'b') {
-                            $global:blackoutActive = ([int]$parts[1] -eq 1)
                         }
                     }
                 }
