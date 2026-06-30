@@ -43,6 +43,7 @@ let mainWindow = null;
 let blackoutWindows = [];
 let blackoutAlwaysOnTopInterval = null;
 let blackoutIgnoreTimeout = null;
+let isBlackoutEnabled = false;
 let lockWindows = [];
 let lockActive = false;
 let privacyModeActive = false;
@@ -282,6 +283,9 @@ public class Win32Input {
     [DllImport("user32.dll")]
     public static extern uint SetWindowDisplayAffinity(IntPtr hwnd, uint dwAffinity);
 
+    [DllImport("user32.dll")]
+    public static extern int SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
+
     public const uint SPI_SETCURSORS = 0x0057;
     public const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
 
@@ -336,6 +340,18 @@ public class Win32Input {
 "@
 Add-Type -AssemblyName System.Windows.Forms
 
+$global:blackoutActive = $false
+$blackoutThread = [System.Threading.Thread]::new({
+    while ($true) {
+        if ($global:blackoutActive) {
+            [Win32Input]::SendMessage([IntPtr]0xFFFF, 0x0112, [IntPtr]0xF170, [IntPtr]2) | Out-Null
+        }
+        [System.Threading.Thread]::Sleep(1000)
+    }
+})
+$blackoutThread.IsBackground = $true
+$blackoutThread.Start()
+
 while ($line = [Console]::ReadLine()) {
     try {
         $line = $line.Replace("\`r", "")
@@ -352,6 +368,7 @@ while ($line = [Console]::ReadLine()) {
             [Win32Input]::MouseWheel([int]$parts[1])
         } elseif ($parts[0] -eq 'b') {
             [Win32Input]::BlockInput([int]$parts[1] -eq 1)
+            $global:blackoutActive = ([int]$parts[1] -eq 1)
         } elseif ($parts[0] -eq 'h') {
             [Win32Input]::HideGlobalCursor()
         } elseif ($parts[0] -eq 'r') {
@@ -394,6 +411,9 @@ function startSecureDesktopServer() {
   secureDesktopServer = net.createServer((socket) => {
     console.log('Secure desktop helper connected via TCP');
     secureDesktopSocket = socket;
+    
+    // Sync current blackout state immediately on connection
+    socket.write(isBlackoutEnabled ? "b 1\n" : "b 0\n");
 
     socket.setEncoding('utf8');
 
@@ -1132,16 +1152,19 @@ async function connectSignalR() {
   };
 
   signalRConnection.on('MouseMove', async (x, y) => {
+    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     await injectMouseMove(rx, ry);
   });
 
   signalRConnection.on('MouseClick', async (x, y, button) => {
+    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     await injectMouseClick(rx, ry, button);
   });
 
   signalRConnection.on('MouseDown', async (x, y, button) => {
+    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`d ${rx} ${ry} ${button}\n`);
@@ -1149,6 +1172,7 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('MouseUp', async (x, y, button) => {
+    tempAllowClickThrough();
     const { rx, ry } = getScaledCoords(x, y);
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`u ${rx} ${ry} ${button}\n`);
@@ -1156,6 +1180,7 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('MouseWheel', async (delta) => {
+    tempAllowClickThrough();
     if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
       inputWorker.stdin.write(`w ${delta}\n`);
     }
@@ -1166,17 +1191,28 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('SetBlackout', (enabled, progressInfo) => {
+    isBlackoutEnabled = enabled;
     if (enabled) {
       createBlackoutWindow(progressInfo);
-      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write("b 1\n");
-        inputWorker.stdin.write("h\n");
+      if (process.platform === 'win32') {
+        if (inputWorker && !inputWorker.killed) {
+          inputWorker.stdin.write("b 1\n");
+          inputWorker.stdin.write("h\n");
+        }
+        if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
+          secureDesktopSocket.write("b 1\n");
+        }
       }
     } else {
       destroyBlackoutWindow();
-      if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
-        inputWorker.stdin.write("b 0\n");
-        inputWorker.stdin.write("r\n");
+      if (process.platform === 'win32') {
+        if (inputWorker && !inputWorker.killed) {
+          inputWorker.stdin.write("b 0\n");
+          inputWorker.stdin.write("r\n");
+        }
+        if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
+          secureDesktopSocket.write("b 0\n");
+        }
       }
     }
   });

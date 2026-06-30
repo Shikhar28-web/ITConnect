@@ -244,6 +244,14 @@ class Program
                     Log($"Executing InjectMouseWheel: Delta={delta} (GetLastError: {Marshal.GetLastWin32Error()})");
                 }
                 break;
+            case "b":
+                if (parts.Length >= 2)
+                {
+                    bool enable = parts[1] == "1";
+                    SetMonitorBlackout(enable);
+                    Log($"Executing SetMonitorBlackout: Enable={enable}");
+                }
+                break;
             case "k":
                 if (parts.Length >= 5)
                 {
@@ -261,6 +269,29 @@ class Program
                     Log($"Executing InjectKey: Keys='{keys}' (GetLastError: {Marshal.GetLastWin32Error()})");
                 }
                 break;
+        }
+    }
+
+    private static bool _blackoutActive = false;
+    private static System.Threading.Thread? _blackoutThread = null;
+
+    public static void SetMonitorBlackout(bool enable)
+    {
+        _blackoutActive = enable;
+        if (enable)
+        {
+            if (_blackoutThread == null || !_blackoutThread.IsAlive)
+            {
+                _blackoutThread = new System.Threading.Thread(() =>
+                {
+                    while (_blackoutActive)
+                    {
+                        NativeMethods.SendMessage((IntPtr)0xFFFF, 0x0112, (IntPtr)0xF170, (IntPtr)2);
+                        System.Threading.Thread.Sleep(1000);
+                    }
+                }) { IsBackground = true };
+                _blackoutThread.Start();
+            }
         }
     }
 
