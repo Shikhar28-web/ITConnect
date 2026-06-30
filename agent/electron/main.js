@@ -283,8 +283,7 @@ public class Win32Input {
     [DllImport("user32.dll")]
     public static extern uint SetWindowDisplayAffinity(IntPtr hwnd, uint dwAffinity);
 
-    [DllImport("user32.dll")]
-    public static extern int SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
+
 
     public const uint SPI_SETCURSORS = 0x0057;
     public const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
@@ -340,17 +339,7 @@ public class Win32Input {
 "@
 Add-Type -AssemblyName System.Windows.Forms
 
-$global:blackoutActive = $false
-$blackoutThread = [System.Threading.Thread]::new({
-    while ($true) {
-        if ($global:blackoutActive) {
-            [Win32Input]::SendMessage([IntPtr]0xFFFF, 0x0112, [IntPtr]0xF170, [IntPtr]2) | Out-Null
-        }
-        [System.Threading.Thread]::Sleep(1000)
-    }
-})
-$blackoutThread.IsBackground = $true
-$blackoutThread.Start()
+
 
 while ($line = [Console]::ReadLine()) {
     try {
@@ -368,7 +357,6 @@ while ($line = [Console]::ReadLine()) {
             [Win32Input]::MouseWheel([int]$parts[1])
         } elseif ($parts[0] -eq 'b') {
             [Win32Input]::BlockInput([int]$parts[1] -eq 1)
-            $global:blackoutActive = ([int]$parts[1] -eq 1)
         } elseif ($parts[0] -eq 'h') {
             [Win32Input]::HideGlobalCursor()
         } elseif ($parts[0] -eq 'r') {
