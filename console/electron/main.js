@@ -179,11 +179,15 @@ ipcMain.handle('upload-local-file-to-server', async (_, localPath, serverUrl) =>
   const form = new FormData();
   form.append('file', fs.createReadStream(localPath), fileName);
 
+  const https = require('https');
+  const agent = new https.Agent({ rejectUnauthorized: false });
+
   try {
     const response = await axios.post(`${safeServerUrl}/api/files/upload`, form, {
       headers: form.getHeaders(),
       maxContentLength: Infinity,
-      maxBodyLength: Infinity
+      maxBodyLength: Infinity,
+      httpsAgent: agent
     });
     return response.data; // returns { fileId, fileName }
   } catch (err) {
