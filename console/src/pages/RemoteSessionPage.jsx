@@ -585,55 +585,55 @@ function RemoteSessionPage() {
     };
   };
 
-  const handleMouseMove = useCallback(async (e) => {
+  const handleMouseMove = useCallback((e) => {
     if (annotation || (!connected && !secureDesktopActive)) return;
     const now = Date.now();
-    if (now - lastMouseMoveTime.current < 50) return; // Throttle to 20 events per second
+    if (now - lastMouseMoveTime.current < 25) return; // Throttle to 40 events per second
     lastMouseMoveTime.current = now;
 
     const coords = getMouseCoords(e);
     if (!coords) return;
 
     if (secureDesktopActive) {
-      await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'move', x: coords.x, y: coords.y }));
+      signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'move', x: coords.x, y: coords.y }));
     } else {
-      await signalRService.sendMouseMove(parseInt(deviceId), coords.x, coords.y);
+      signalRService.sendMouseMove(parseInt(deviceId), coords.x, coords.y);
     }
   }, [annotation, connected, deviceId, secureDesktopActive]);
 
-  const handleMouseDown = useCallback(async (e) => {
+  const handleMouseDown = useCallback((e) => {
     if (annotation || (!connected && !secureDesktopActive)) return;
     const coords = getMouseCoords(e);
     if (!coords) return;
 
     if (secureDesktopActive) {
-      await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'mousedown', x: coords.x, y: coords.y, button: e.button }));
+      signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'mousedown', x: coords.x, y: coords.y, button: e.button }));
     } else {
-      await signalRService.sendMouseDown(parseInt(deviceId), coords.x, coords.y, e.button);
+      signalRService.sendMouseDown(parseInt(deviceId), coords.x, coords.y, e.button);
     }
   }, [annotation, connected, deviceId, secureDesktopActive]);
 
-  const handleMouseUp = useCallback(async (e) => {
+  const handleMouseUp = useCallback((e) => {
     if (annotation || (!connected && !secureDesktopActive)) return;
     const coords = getMouseCoords(e);
     if (!coords) return;
 
     if (secureDesktopActive) {
-      await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'mouseup', x: coords.x, y: coords.y, button: e.button }));
+      signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'mouseup', x: coords.x, y: coords.y, button: e.button }));
       // Send a click as well to guarantee interaction
-      await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'click', x: coords.x, y: coords.y, button: e.button }));
+      signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'click', x: coords.x, y: coords.y, button: e.button }));
     } else {
-      await signalRService.sendMouseUp(parseInt(deviceId), coords.x, coords.y, e.button);
+      signalRService.sendMouseUp(parseInt(deviceId), coords.x, coords.y, e.button);
     }
   }, [annotation, connected, deviceId, secureDesktopActive]);
 
-  const handleWheel = useCallback(async (e) => {
+  const handleWheel = useCallback((e) => {
     if (annotation || (!connected && !secureDesktopActive)) return;
     const delta = e.deltaY > 0 ? -120 : 120;
     if (secureDesktopActive) {
-      await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'wheel', delta }));
+      signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'wheel', delta }));
     } else {
-      await signalRService.sendMouseWheel(parseInt(deviceId), delta);
+      signalRService.sendMouseWheel(parseInt(deviceId), delta);
     }
   }, [annotation, connected, deviceId, secureDesktopActive]);
 

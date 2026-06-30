@@ -83,28 +83,28 @@ class SignalRService {
     await this.remoteControlHub?.invoke('SendIceCandidate', targetConnId, JSON.stringify(candidate));
   }
 
-  async sendMouseMove(deviceId, x, y) {
-    await this.remoteControlHub?.invoke('SendMouseMove', deviceId.toString(), x, y);
+  sendMouseMove(deviceId, x, y) {
+    this.remoteControlHub?.send('SendMouseMove', deviceId.toString(), x, y).catch(() => {});
   }
 
-  async sendMouseClick(deviceId, x, y, button) {
-    await this.remoteControlHub?.invoke('SendMouseClick', deviceId.toString(), x, y, button);
+  sendMouseClick(deviceId, x, y, button) {
+    this.remoteControlHub?.send('SendMouseClick', deviceId.toString(), x, y, button).catch(() => {});
   }
 
-  async sendMouseDown(deviceId, x, y, button) {
-    await this.remoteControlHub?.invoke('SendMouseDown', deviceId.toString(), x, y, button);
+  sendMouseDown(deviceId, x, y, button) {
+    this.remoteControlHub?.send('SendMouseDown', deviceId.toString(), x, y, button).catch(() => {});
   }
 
-  async sendMouseUp(deviceId, x, y, button) {
-    await this.remoteControlHub?.invoke('SendMouseUp', deviceId.toString(), x, y, button);
+  sendMouseUp(deviceId, x, y, button) {
+    this.remoteControlHub?.send('SendMouseUp', deviceId.toString(), x, y, button).catch(() => {});
   }
 
-  async sendMouseWheel(deviceId, delta) {
-    await this.remoteControlHub?.invoke('SendMouseWheel', deviceId.toString(), delta);
+  sendMouseWheel(deviceId, delta) {
+    this.remoteControlHub?.send('SendMouseWheel', deviceId.toString(), delta).catch(() => {});
   }
 
-  async sendKeyEvent(deviceId, key, isDown, ctrl, alt, shift) {
-    await this.remoteControlHub?.invoke('SendKeyEvent', deviceId.toString(), key, isDown, ctrl, alt, shift);
+  sendKeyEvent(deviceId, key, isDown, ctrl, alt, shift) {
+    this.remoteControlHub?.send('SendKeyEvent', deviceId.toString(), key, isDown, ctrl, alt, shift).catch(() => {});
   }
 
   async setBlackout(deviceId, sessionId, enabled, progressInfo) {
@@ -161,12 +161,12 @@ class SignalRService {
     await this.remoteControlHub?.invoke('WriteRegistry', deviceId.toString(), keyPath, valueName, value, valueType);
   }
 
-  async sendAnnotation(deviceId, annotationJson) {
-    await this.remoteControlHub?.invoke('SendAnnotation', deviceId.toString(), annotationJson);
+  sendAnnotation(deviceId, annotationJson) {
+    this.remoteControlHub?.send('SendAnnotation', deviceId.toString(), annotationJson).catch(() => {});
   }
 
-  async sendSecureDesktopInput(deviceId, inputJson) {
-    await this.remoteControlHub?.invoke('SendSecureDesktopInput', deviceId.toString(), inputJson);
+  sendSecureDesktopInput(deviceId, inputJson) {
+    this.remoteControlHub?.send('SendSecureDesktopInput', deviceId.toString(), inputJson).catch(() => {});
   }
 
   // ─── Chat Methods ─────────────────────────────────────────────────────────
