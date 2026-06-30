@@ -165,6 +165,8 @@ ipcMain.handle('upload-local-file-to-server', async (_, localPath, serverUrl) =>
   const path = require('path');
   const axios = require('axios');
   const FormData = require('form-data');
+  const crypto = require('crypto');
+  const https = require('https');
 
   if (!fs.existsSync(localPath)) {
     throw new Error('Local file does not exist.');
@@ -175,23 +177,88 @@ ipcMain.handle('upload-local-file-to-server', async (_, localPath, serverUrl) =>
     safeServerUrl = safeServerUrl.replace('localhost', '127.0.0.1');
   }
 
-  const fileName = path.basename(localPath);
-  const form = new FormData();
-  form.append('file', fs.createReadStream(localPath), fileName);
-
-  const https = require('https');
   const agent = new https.Agent({ rejectUnauthorized: false });
+  const transferId = crypto.randomUUID();
+  const fileName = path.basename(localPath);
+  const chunkSize = 256 * 1024; // 256 KB chunks
+
+  let fd = null;
+  let fileLength = 0;
+  try {
+    fd = fs.openSync(localPath, 'r');
+    fileLength = fs.statSync(localPath).size;
+  } catch (err) {
+    console.error('Failed to open file locally:', err.message);
+    throw err;
+  }
+
+  let offset = 0;
+  let fileHash = crypto.createHash('sha256');
 
   try {
-    const response = await axios.post(`${safeServerUrl}/api/files/upload`, form, {
-      headers: form.getHeaders(),
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity,
+    while (offset < fileLength) {
+      const readBuf = Buffer.alloc(Math.min(chunkSize, fileLength - offset));
+      const bytesRead = fs.readSync(fd, readBuf, 0, readBuf.length, offset);
+      if (bytesRead <= 0) break;
+
+      const chunkBuffer = readBuf.subarray(0, bytesRead);
+      const chunkHash = crypto.createHash('sha256').update(chunkBuffer).digest('hex');
+      fileHash.update(chunkBuffer);
+
+      let success = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const form = new FormData();
+          form.append('transferId', transferId);
+          form.append('offset', offset.toString());
+          form.append('hash', chunkHash);
+          form.append('chunk', chunkBuffer, { filename: 'chunk.bin', contentType: 'application/octet-stream' });
+
+          const uploadResp = await axios.post(`${safeServerUrl}/api/files/upload/chunk`, form, {
+            headers: form.getHeaders(),
+            httpsAgent: agent,
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity
+          });
+
+          if (uploadResp.status === 200) {
+            success = true;
+            break;
+          }
+        } catch (uploadErr) {
+          console.warn(`Console upload chunk offset ${offset} failed (attempt ${attempt}/3):`, uploadErr.message);
+        }
+      }
+
+      if (!success) {
+        throw new Error(`Failed to upload chunk at offset ${offset} after 3 attempts.`);
+      }
+
+      offset += chunkBuffer.length;
+    }
+
+    fs.closeSync(fd);
+    fd = null;
+
+    const finalHash = fileHash.digest('hex');
+    const commitResp = await axios.post(`${safeServerUrl}/api/files/upload/commit`, {
+      transferId: transferId,
+      fileName: fileName,
+      expectedHash: finalHash
+    }, {
       httpsAgent: agent
     });
-    return response.data; // returns { fileId, fileName }
+
+    if (commitResp.status === 200) {
+      return commitResp.data; // returns { fileId, fileName }
+    }
+    throw new Error('Commit failed on server');
+
   } catch (err) {
     console.error('Failed to upload local file from main process:', err.message);
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+    }
     throw err;
   }
 });
