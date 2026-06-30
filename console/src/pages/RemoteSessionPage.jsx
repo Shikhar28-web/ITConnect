@@ -202,6 +202,7 @@ function RemoteSessionPage() {
   const lastMouseMoveTime = useRef(0);
   const lastClipboardRef = useRef('');
   const targetFoldersRef = useRef({});
+  const localCursorRef = useRef(null);
 
   const initialized = useRef(false);
 
@@ -584,6 +585,27 @@ function RemoteSessionPage() {
       y: Math.round(clampedY * 10000)
     };
   };
+
+  const handleLocalMouseMoveOnly = useCallback((e) => {
+    if (annotation || (!connected && !secureDesktopActive)) {
+      if (localCursorRef.current) localCursorRef.current.style.display = 'none';
+      return;
+    }
+    if (localCursorRef.current) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      localCursorRef.current.style.display = 'block';
+      localCursorRef.current.style.left = `${x}px`;
+      localCursorRef.current.style.top = `${y}px`;
+    }
+  }, [annotation, connected, secureDesktopActive]);
+
+  const handleMouseLeave = useCallback(() => {
+    if (localCursorRef.current) {
+      localCursorRef.current.style.display = 'none';
+    }
+  }, []);
 
   const handleMouseMove = useCallback((e) => {
     if (annotation || (!connected && !secureDesktopActive)) return;
@@ -1017,8 +1039,25 @@ function RemoteSessionPage() {
               className="viewer-canvas-wrap"
               tabIndex={0}
               onKeyDown={handleKeyDown}
+              onMouseMove={handleLocalMouseMoveOnly}
+              onMouseLeave={handleMouseLeave}
               style={{ position: 'relative', flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#000', overflow: 'hidden' }}
             >
+              {/* Local Cursor Overlay */}
+              <div 
+                ref={localCursorRef}
+                style={{
+                  position: 'absolute',
+                  width: '16px',
+                  height: '25px',
+                  pointerEvents: 'none',
+                  zIndex: 100,
+                  display: 'none',
+                  backgroundImage: 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'16\' height=\'25\' viewBox=\'0 0 16 25\'><path fill=\'white\' stroke=\'black\' stroke-width=\'1.5\' d=\'M0,0 L0,18.5 L4.8,13.7 L8.8,22.8 L12.1,21.3 L8.2,12.4 L13.8,12.4 Z\'/></svg>")',
+                  backgroundSize: 'contain',
+                  backgroundRepeat: 'no-repeat'
+                }}
+              />
               {secureDesktopActive && (
                 <div style={{
                   position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
