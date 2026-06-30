@@ -201,6 +201,7 @@ function RemoteSessionPage() {
   const lastPos = useRef(null);
   const lastMouseMoveTime = useRef(0);
   const lastClipboardRef = useRef('');
+  const targetFoldersRef = useRef({});
 
   const initialized = useRef(false);
 
@@ -394,22 +395,45 @@ function RemoteSessionPage() {
         },
         onFileDownloadReady: async (fileId, fileName) => {
           const downloadUrl = `${BASE_URL}/api/files/download/${fileId}?name=${encodeURIComponent(fileName)}`;
-          if (window.electronAPI && window.electronAPI.downloadFileAndCopyToClipboard) {
-            try {
-              await window.electronAPI.downloadFileAndCopyToClipboard(downloadUrl, fileName);
-              toast.success(`Copied to local clipboard: ${fileName}`);
-            } catch (err) {
-              console.error('Failed to copy downloaded file to local clipboard:', err.message);
-              toast.error(`Failed to copy ${fileName} to clipboard`);
+          const localTargetFolder = targetFoldersRef.current[fileName];
+          
+          if (localTargetFolder && localTargetFolder !== 'drives') {
+            delete targetFoldersRef.current[fileName];
+            if (window.electronAPI && window.electronAPI.downloadFileToDirectory) {
+              try {
+                await window.electronAPI.downloadFileToDirectory(downloadUrl, fileName, localTargetFolder);
+                toast.success(`File received: saved to ${localTargetFolder}\\${fileName}`);
+                window.dispatchEvent(new CustomEvent('local-directory-changed', { detail: { path: localTargetFolder } }));
+              } catch (err) {
+                console.error('Failed to download file to target directory:', err.message);
+                toast.error(`Failed to save ${fileName} to local folder.`);
+              }
+            } else {
+              const link = document.createElement('a');
+              link.href = downloadUrl;
+              link.setAttribute('download', fileName);
+              document.body.appendChild(link);
+              link.click();
+              link.remove();
             }
           } else {
-            const link = document.createElement('a');
-            link.href = downloadUrl;
-            link.setAttribute('download', fileName);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            toast.success(`Downloaded: ${fileName}`);
+            if (window.electronAPI && window.electronAPI.downloadFileAndCopyToClipboard) {
+              try {
+                await window.electronAPI.downloadFileAndCopyToClipboard(downloadUrl, fileName);
+                toast.success(`Copied to local clipboard: ${fileName}`);
+              } catch (err) {
+                console.error('Failed to copy downloaded file to local clipboard:', err.message);
+                toast.error(`Failed to copy ${fileName} to clipboard`);
+              }
+            } else {
+              const link = document.createElement('a');
+              link.href = downloadUrl;
+              link.setAttribute('download', fileName);
+              document.body.appendChild(link);
+              link.click();
+              link.remove();
+              toast.success(`Downloaded: ${fileName}`);
+            }
           }
           setTransferringFile(null);
         },
@@ -1072,6 +1096,9 @@ function RemoteSessionPage() {
               setCurrentPath(path);
               setFileLoading(true);
               signalRService.listDirectory(parseInt(deviceId), path);
+            }}
+            onDownloadRequest={(fileName, localTargetFolder) => {
+              targetFoldersRef.current[fileName] = localTargetFolder;
             }}
           />
         )}

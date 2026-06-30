@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
 import signalRService from '../services/signalr';
 
-function FileTransferSidebar({ deviceId, onClose, serverUrl, remotePath, remoteItems, onNavigateRemote }) {
+function FileTransferSidebar({ deviceId, onClose, serverUrl, remotePath, remoteItems, onNavigateRemote, onDownloadRequest }) {
   const [localPath, setLocalPath] = useState(window.electronAPI ? 'C:\\' : 'drives');
   const [localItems, setLocalItems] = useState([]);
   const [localLoading, setLocalLoading] = useState(false);
@@ -13,6 +13,16 @@ function FileTransferSidebar({ deviceId, onClose, serverUrl, remotePath, remoteI
 
   useEffect(() => {
     loadLocalDirectory(localPath);
+  }, [localPath]);
+
+  useEffect(() => {
+    const handleLocalRefresh = (e) => {
+      if (e.detail?.path === localPath) {
+        loadLocalDirectory(localPath);
+      }
+    };
+    window.addEventListener('local-directory-changed', handleLocalRefresh);
+    return () => window.removeEventListener('local-directory-changed', handleLocalRefresh);
   }, [localPath]);
 
   async function loadLocalDirectory(pathStr) {
@@ -105,6 +115,9 @@ function FileTransferSidebar({ deviceId, onClose, serverUrl, remotePath, remoteI
     setTransferring(true);
     toast.info(`Downloading ${selectedRemoteFile.name}...`);
     try {
+      if (onDownloadRequest) {
+        onDownloadRequest(selectedRemoteFile.name, localPath);
+      }
       await signalRService.requestFileDownload(parseInt(deviceId), selectedRemoteFile.path);
     } catch (err) {
       toast.error(`Download failed: ${err.message}`);

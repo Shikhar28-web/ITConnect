@@ -262,3 +262,37 @@ ipcMain.handle('upload-local-file-to-server', async (_, localPath, serverUrl) =>
     throw err;
   }
 });
+
+ipcMain.handle('download-file-to-directory', async (_, url, fileName, targetDirectory) => {
+  const https = require('https');
+  const fs = require('fs');
+  const path = require('path');
+
+  let safeUrl = url;
+  if (safeUrl.includes('localhost')) {
+    safeUrl = safeUrl.replace('localhost', '127.0.0.1');
+  }
+
+  const agent = new https.Agent({ rejectUnauthorized: false });
+
+  if (!fs.existsSync(targetDirectory)) {
+    fs.mkdirSync(targetDirectory, { recursive: true });
+  }
+
+  const localFilePath = path.join(targetDirectory, fileName);
+  const fileStream = fs.createWriteStream(localFilePath);
+
+  return new Promise((resolve, reject) => {
+    https.get(safeUrl, { rejectUnauthorized: false, httpsAgent: agent }, (response) => {
+      response.pipe(fileStream);
+      fileStream.on('finish', () => {
+        fileStream.close();
+        console.log('[Console Download] File downloaded successfully to:', localFilePath);
+        resolve(localFilePath);
+      });
+    }).on('error', (err) => {
+      fs.unlink(localFilePath, () => {});
+      reject(err);
+    });
+  });
+});
