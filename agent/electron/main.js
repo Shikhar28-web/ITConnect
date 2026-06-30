@@ -13,19 +13,24 @@ app.commandLine.appendSwitch('disable-features', 'AllowWgcScreenCapturer,AllowWg
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 function loadServerUrl() {
-  if (process.env.SERVER_URL) return process.env.SERVER_URL;
-
-  const configPath = path.join(__dirname, '../config.json');
-  if (fs.existsSync(configPath)) {
-    try {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      if (config.serverUrl) return config.serverUrl;
-    } catch (e) {
-      console.warn('Failed to read config.json:', e.message);
+  let url = 'http://127.0.0.1:5000';
+  if (process.env.SERVER_URL) {
+    url = process.env.SERVER_URL;
+  } else {
+    const configPath = path.join(__dirname, '../config.json');
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        if (config.serverUrl) url = config.serverUrl;
+      } catch (e) {
+        console.warn('Failed to read config.json:', e.message);
+      }
     }
   }
-
-  return 'http://localhost:5000';
+  if (url.includes('localhost')) {
+    url = url.replace('localhost', '127.0.0.1');
+  }
+  return url;
 }
 
 const SERVER_URL = loadServerUrl();

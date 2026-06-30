@@ -75,6 +75,11 @@ ipcMain.handle('download-file-and-copy-to-clipboard', async (_, url, fileName) =
   const os = require('os');
   const { execSync } = require('child_process');
 
+  let safeUrl = url;
+  if (safeUrl.includes('localhost')) {
+    safeUrl = safeUrl.replace('localhost', '127.0.0.1');
+  }
+
   const tempDir = path.join(os.tmpdir(), 'ITConnectTransfers');
   if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(tempDir, { recursive: true });
@@ -84,7 +89,7 @@ ipcMain.handle('download-file-and-copy-to-clipboard', async (_, url, fileName) =
   const fileStream = fs.createWriteStream(localFilePath);
 
   return new Promise((resolve, reject) => {
-    https.get(url, { rejectUnauthorized: false }, (response) => {
+    https.get(safeUrl, { rejectUnauthorized: false }, (response) => {
       response.pipe(fileStream);
       fileStream.on('finish', () => {
         fileStream.close();
