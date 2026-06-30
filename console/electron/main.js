@@ -127,22 +127,28 @@ ipcMain.handle('list-local-directory', async (_, dirPath) => {
 
   try {
     const entries = fs.readdirSync(targetPath, { withFileTypes: true });
-    return entries.map(e => {
-      const fullPath = path.join(targetPath, e.name);
-      let size = 0;
-      let isDirectory = false;
-      try { isDirectory = e.isDirectory(); } catch {}
-      if (!isDirectory) {
-        try { size = fs.statSync(fullPath).size; } catch {}
+    const results = [];
+    for (const e of entries) {
+      try {
+        const fullPath = path.join(targetPath, e.name);
+        let size = 0;
+        let isDirectory = false;
+        try { isDirectory = e.isDirectory(); } catch {}
+        if (!isDirectory) {
+          try { size = fs.statSync(fullPath).size; } catch {}
+        }
+        results.push({
+          name: e.name,
+          isDirectory: isDirectory,
+          path: fullPath,
+          size: size,
+          modified: null
+        });
+      } catch (itemErr) {
+        // Skip individual files/folders that are restricted or locked
       }
-      return {
-        name: e.name,
-        isDirectory: isDirectory,
-        path: fullPath,
-        size: size,
-        modified: null
-      };
-    });
+    }
+    return results;
   } catch (err) {
     console.error('Failed to list local directory:', err.message);
     throw err;
