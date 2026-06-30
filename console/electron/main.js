@@ -170,12 +170,17 @@ ipcMain.handle('upload-local-file-to-server', async (_, localPath, serverUrl) =>
     throw new Error('Local file does not exist.');
   }
 
+  let safeServerUrl = serverUrl;
+  if (safeServerUrl.includes('localhost')) {
+    safeServerUrl = safeServerUrl.replace('localhost', '127.0.0.1');
+  }
+
   const fileName = path.basename(localPath);
   const form = new FormData();
   form.append('file', fs.createReadStream(localPath), fileName);
 
   try {
-    const response = await axios.post(`${serverUrl}/api/files/upload`, form, {
+    const response = await axios.post(`${safeServerUrl}/api/files/upload`, form, {
       headers: form.getHeaders(),
       maxContentLength: Infinity,
       maxBodyLength: Infinity

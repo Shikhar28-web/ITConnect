@@ -305,7 +305,7 @@ function RemoteSessionPage() {
     if (peerRef.current) {
       try {
         peerRef.current.close();
-      } catch (e) {}
+      } catch (e) { }
       peerRef.current = null;
     }
 
@@ -324,7 +324,7 @@ function RemoteSessionPage() {
 
     pc.onicecandidate = async (event) => {
       if (event.candidate && peerRef.current === pc) {
-        await signalRService.sendIceCandidate('agent', event.candidate).catch(() => {});
+        await signalRService.sendIceCandidate('agent', event.candidate).catch(() => { });
       }
     };
 
@@ -356,7 +356,7 @@ function RemoteSessionPage() {
         },
         onIceCandidate: async (candidateJson) => {
           const candidate = JSON.parse(candidateJson);
-          await peerRef.current?.addIceCandidate(candidate).catch(() => {});
+          await peerRef.current?.addIceCandidate(candidate).catch(() => { });
         },
         onCommandOutput: (output, isError) => {
           window.dispatchEvent(new CustomEvent('command-output', { detail: { output, isError } }));
@@ -451,11 +451,11 @@ function RemoteSessionPage() {
     if (peerRef.current) {
       try {
         peerRef.current.close();
-      } catch (e) {}
+      } catch (e) { }
       peerRef.current = null;
     }
     if (signalRService.remoteControlHub) {
-      signalRService.remoteControlHub.stop().catch(() => {});
+      signalRService.remoteControlHub.stop().catch(() => { });
       signalRService.remoteControlHub = null;
     }
   }
@@ -629,16 +629,16 @@ function RemoteSessionPage() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      
+
       const response = await fetch(`${BASE_URL}/api/files/upload`, {
         method: 'POST',
         body: formData
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         const { fileId, fileName } = data;
-        
+
         // Tell agent to download file to Desktop by default
         const desktopPath = 'C:\\Users\\Public\\Desktop';
         await signalRService.sendFileToAgent(parseInt(deviceId), fileId, fileName, desktopPath);
@@ -1100,7 +1100,7 @@ function RemoteSessionPage() {
                   signalRService.listDirectory(parseInt(deviceId), currentPath);
                 }}
               >Go / Refresh</button>
-              
+
               <input
                 type="file"
                 id="file-upload-input"
@@ -1113,12 +1113,12 @@ function RemoteSessionPage() {
                   try {
                     const formData = new FormData();
                     formData.append('file', file);
-                    
+
                     const response = await fetch(`${BASE_URL}/api/files/upload`, {
                       method: 'POST',
                       body: formData
                     });
-                    
+
                     if (response.ok) {
                       const data = await response.json();
                       const { fileId, fileName } = data;
@@ -1144,7 +1144,7 @@ function RemoteSessionPage() {
                 {transferringFile ? '⏳ Sending...' : '📤 Send File'}
               </button>
             </div>
-            
+
             {fileLoading ? (
               <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
                 <div className="loading-spinner" />
