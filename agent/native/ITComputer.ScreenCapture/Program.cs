@@ -439,8 +439,14 @@ public class BlackoutForm : Form
             // WS_EX_TRANSPARENT = 0x20 (Click-through)
             // WS_EX_NOACTIVATE = 0x08000000 (No focus activation)
             // WS_EX_TOPMOST = 0x8
-            cp.ExStyle |= 0x20 | 0x08000000 | 0x8;
+            // WS_EX_LAYERED = 0x80000 (Required for click-through to work)
+            cp.ExStyle |= 0x20 | 0x08000000 | 0x8 | 0x80000;
             return cp;
         }
+    }
+
+    protected override bool ShowWithoutActivation
+    {
+        get { return true; }
     }
 }
