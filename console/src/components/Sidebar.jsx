@@ -2,16 +2,19 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 
 const navItems = [
-  { section: 'Main', items: [
-    { to: '/dashboard', icon: '📊', label: 'Dashboard' },
-    { to: '/devices', icon: '🖥️', label: 'Devices' },
-  ]},
-  { section: 'Admin', items: [
-    { to: '/users', icon: '👤', label: 'Users' },
-    { to: '/audit-logs', icon: '🛡️', label: 'Audit Logs' },
-    { to: '/reports', icon: '📈', label: 'Reports' },
-    { to: '/settings', icon: '⚙️', label: 'Settings' },
-  ]},
+  {
+    section: 'Main', items: [
+      { to: '/dashboard', icon: '📊', label: 'Dashboard' },
+      { to: '/devices', icon: '🖥️', label: 'Devices' },
+    ]
+  },
+  {
+    section: 'Admin', items: [
+      { to: '/users', icon: '👤', label: 'Users' },
+      { to: '/reports', icon: '📈', label: 'Reports' },
+      { to: '/settings', icon: '⚙️', label: 'Settings' },
+    ]
+  },
 ];
 
 function Sidebar({ user }) {

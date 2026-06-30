@@ -5,7 +5,6 @@ const pageTitles = {
   '/dashboard': 'Dashboard',
   '/devices': 'Device Management',
   '/users': 'User Management',
-  '/audit-logs': 'Audit Logs',
   '/reports': 'Reports & Analytics',
   '/settings': 'Settings',
 };

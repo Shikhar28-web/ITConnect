@@ -58,6 +58,13 @@ function updateUiStatus(connected, message, sessionActive = undefined, engineerN
   if (sessionActive !== undefined) {
     uiStatus.sessionActive = sessionActive;
     uiStatus.engineerName = engineerName;
+    try {
+      if (sessionActive) {
+        mainWindow?.setSize(850, 600, true);
+      } else {
+        mainWindow?.setSize(480, 600, true);
+      }
+    } catch {}
   }
   try {
     mainWindow?.webContents.send('agent-status', uiStatus);
@@ -1454,6 +1461,7 @@ async function connectSignalR() {
       }
 
       console.log(`[ReceiveFileFromAdmin] File download chunk-by-chunk completed successfully.`);
+      mainWindow?.webContents.send('file-received-notification', { fileName, targetFolder });
       
       try {
         await axios.delete(`${SERVER_URL}/api/files/cleanup/${fileId}`);
@@ -1893,4 +1901,128 @@ function startClipboardMonitor() {
     }
   }, 1000);
 }
+
+ipcMain.handle('list-local-directory', async (_, dirPath) => {
+  return await listDirectory(dirPath);
+});
+
+ipcMain.handle('send-local-file-to-admin', async (_, filePath) => {
+  if (!currentEngineerConnId) {
+    throw new Error('No support session is currently active.');
+  }
+
+  console.log(`[Agent Transfer] Uploading file ${filePath} chunk-by-chunk...`);
+  const crypto = require('crypto');
+  const transferId = crypto.randomUUID();
+  const fileName = path.basename(filePath);
+  const chunkSize = 256 * 1024; // 256 KB chunks
+
+  let offset = 0;
+  let fileHash = crypto.createHash('sha256');
+  let useService = (process.platform === 'win32' && servicePipeConnected);
+
+  let fd = null;
+  let fileLength = 0;
+  if (!useService) {
+    try {
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`File does not exist: ${filePath}`);
+      }
+      fd = fs.openSync(filePath, 'r');
+      fileLength = fs.statSync(filePath).size;
+    } catch (err) {
+      console.error('Failed to open file locally:', err.message);
+      throw err;
+    }
+  }
+
+  try {
+    while (true) {
+      let chunkBuffer = null;
+      let chunkHash = '';
+
+      if (useService) {
+        const resp = await sendServiceIpcRequest(`READ|${transferId}|${filePath}|${offset}|${chunkSize}`);
+        if (resp === 'EOF') {
+          break;
+        }
+        if (resp.startsWith('ERROR|')) {
+          throw new Error(resp.substring(6));
+        }
+        if (resp.startsWith('OK|')) {
+          const parts = resp.split('|');
+          chunkHash = parts[1];
+          chunkBuffer = Buffer.from(parts[2], 'base64');
+        } else {
+          throw new Error(`Unexpected IPC response: ${resp}`);
+        }
+      } else {
+        if (offset >= fileLength) break;
+        const readBuf = Buffer.alloc(Math.min(chunkSize, fileLength - offset));
+        const bytesRead = fs.readSync(fd, readBuf, 0, readBuf.length, offset);
+        if (bytesRead <= 0) break;
+        chunkBuffer = readBuf.subarray(0, bytesRead);
+        chunkHash = crypto.createHash('sha256').update(chunkBuffer).digest('hex');
+      }
+
+      fileHash.update(chunkBuffer);
+
+      let success = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const { Blob } = require('buffer');
+          const blob = new Blob([chunkBuffer]);
+          const formData = new FormData();
+          formData.append('transferId', transferId);
+          formData.append('offset', offset.toString());
+          formData.append('hash', chunkHash);
+          formData.append('chunk', blob, 'chunk.bin');
+
+          const uploadResp = await axios.post(`${SERVER_URL}/api/files/upload/chunk`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          });
+
+          if (uploadResp.status === 200) {
+            success = true;
+            break;
+          }
+        } catch (uploadErr) {
+          console.warn(`Agent upload chunk offset ${offset} failed (attempt ${attempt}/3):`, uploadErr.message);
+        }
+      }
+
+      if (!success) {
+        throw new Error(`Failed to upload chunk at offset ${offset} after 3 attempts.`);
+      }
+
+      offset += chunkBuffer.length;
+    }
+
+    if (fd !== null) {
+      fs.closeSync(fd);
+      fd = null;
+    }
+
+    const finalHash = fileHash.digest('hex');
+    const commitResp = await axios.post(`${SERVER_URL}/api/files/upload/commit`, {
+      transferId: transferId,
+      fileName: fileName,
+      expectedHash: finalHash
+    });
+
+    if (commitResp.status === 200) {
+      const { fileId, fileName: committedName } = commitResp.data;
+      console.log(`[Agent Transfer] Successfully uploaded all chunks for ${filePath}. Triggering FileDownloadReady.`);
+      await signalRConnection.invoke('FileDownloadReady', currentEngineerConnId, fileId, committedName);
+      return { success: true, fileName: committedName };
+    }
+    throw new Error('Commit failed on server');
+  } catch (e) {
+    console.error('[Agent Transfer] Chunk-based transfer failed:', e.message);
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+    }
+    throw e;
+  }
+});
 

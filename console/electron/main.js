@@ -106,3 +106,72 @@ ipcMain.handle('download-file-and-copy-to-clipboard', async (_, url, fileName) =
     });
   });
 });
+
+ipcMain.handle('list-local-directory', async (_, dirPath) => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  
+  let targetPath = dirPath;
+  if (!targetPath || targetPath === 'drives') {
+    if (process.platform === 'win32') {
+      return [
+        { name: 'C:\\', isDirectory: true, path: 'C:\\', size: 0, modified: null },
+        { name: 'Desktop', isDirectory: true, path: path.join(os.homedir(), 'Desktop'), size: 0, modified: null },
+        { name: 'Downloads', isDirectory: true, path: path.join(os.homedir(), 'Downloads'), size: 0, modified: null }
+      ];
+    } else {
+      return [{ name: '/', isDirectory: true, path: '/', size: 0, modified: null }];
+    }
+  }
+
+  try {
+    const entries = fs.readdirSync(targetPath, { withFileTypes: true });
+    return entries.map(e => {
+      const fullPath = path.join(targetPath, e.name);
+      let size = 0;
+      let isDirectory = false;
+      try { isDirectory = e.isDirectory(); } catch {}
+      if (!isDirectory) {
+        try { size = fs.statSync(fullPath).size; } catch {}
+      }
+      return {
+        name: e.name,
+        isDirectory: isDirectory,
+        path: fullPath,
+        size: size,
+        modified: null
+      };
+    });
+  } catch (err) {
+    console.error('Failed to list local directory:', err.message);
+    throw err;
+  }
+});
+
+ipcMain.handle('upload-local-file-to-server', async (_, localPath, serverUrl) => {
+  const fs = require('fs');
+  const path = require('path');
+  const axios = require('axios');
+  const FormData = require('form-data');
+
+  if (!fs.existsSync(localPath)) {
+    throw new Error('Local file does not exist.');
+  }
+
+  const fileName = path.basename(localPath);
+  const form = new FormData();
+  form.append('file', fs.createReadStream(localPath), fileName);
+
+  try {
+    const response = await axios.post(`${serverUrl}/api/files/upload`, form, {
+      headers: form.getHeaders(),
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
+    });
+    return response.data; // returns { fileId, fileName }
+  } catch (err) {
+    console.error('Failed to upload local file from main process:', err.message);
+    throw err;
+  }
+});

@@ -26,6 +26,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Remove listeners
-  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)
+  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
+
+  // File explorer & transfer
+  listLocalDirectory: (dirPath) => ipcRenderer.invoke('list-local-directory', dirPath),
+  sendLocalFileToAdmin: (filePath) => ipcRenderer.invoke('send-local-file-to-admin', filePath),
+  onFileReceivedNotification: (callback) => {
+    const sub = (_, data) => callback(data);
+    ipcRenderer.on('file-received-notification', sub);
+    return () => ipcRenderer.removeListener('file-received-notification', sub);
+  }
 });
 

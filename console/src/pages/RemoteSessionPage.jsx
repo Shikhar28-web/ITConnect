@@ -3,6 +3,7 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { devices as devicesApi, sessions as sessionsApi } from '../services/api';
 import { signalRService } from '../services/signalr';
+import FileTransferSidebar from '../components/FileTransferSidebar';
 
 const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
@@ -185,6 +186,7 @@ function RemoteSessionPage() {
   const [fileLoading, setFileLoading] = useState(false);
   const [transferringFile, setTransferringFile] = useState(null);
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
+  const [showFileTransferSidebar, setShowFileTransferSidebar] = useState(false);
   const [customLaunchInput, setCustomLaunchInput] = useState('');
   const [keepAwake, setKeepAwake] = useState(false);
   const [secureDesktopActive, setSecureDesktopActive] = useState(false);
@@ -777,6 +779,11 @@ function RemoteSessionPage() {
               <div className="toolbar-group">
                 <button id="btn-clipboard" className="toolbar-btn" title="Sync Clipboard" onClick={handleClipboardSync}>📋</button>
                 <button
+                  className={`toolbar-btn ${showFileTransferSidebar ? 'active' : ''}`}
+                  title="File Transfer Sidebar"
+                  onClick={() => setShowFileTransferSidebar(!showFileTransferSidebar)}
+                >📂⇄</button>
+                <button
                   className="toolbar-btn"
                   title="Reconnect Stream"
                   onClick={handleReconnect}
@@ -1053,6 +1060,20 @@ function RemoteSessionPage() {
               )}
             </div>
           </div>
+        )}
+        {activeTab === 'remote' && showFileTransferSidebar && (
+          <FileTransferSidebar
+            deviceId={deviceId}
+            onClose={() => setShowFileTransferSidebar(false)}
+            serverUrl={BASE_URL}
+            remotePath={currentPath}
+            remoteItems={files}
+            onNavigateRemote={(path) => {
+              setCurrentPath(path);
+              setFileLoading(true);
+              signalRService.listDirectory(parseInt(deviceId), path);
+            }}
+          />
         )}
 
         {activeTab === 'terminal' && (
