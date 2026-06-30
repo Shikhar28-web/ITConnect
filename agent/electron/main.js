@@ -429,6 +429,23 @@ function startSecureDesktopServer() {
 // Connect to Windows Service Named Pipe for SAS and session events
 let servicePipe = null;
 let servicePipeConnected = false;
+const pendingIpcRequests = [];
+
+function sendServiceIpcRequest(command) {
+  return new Promise((resolve, reject) => {
+    if (!servicePipe || !servicePipeConnected) {
+      return reject(new Error('Windows Service named pipe is not connected.'));
+    }
+    pendingIpcRequests.push({ resolve, reject });
+    try {
+      servicePipe.write(command + '\n');
+    } catch (err) {
+      const index = pendingIpcRequests.findIndex(x => x.resolve === resolve);
+      if (index !== -1) pendingIpcRequests.splice(index, 1);
+      reject(err);
+    }
+  });
+}
 
 function connectServicePipe() {
   if (process.platform !== 'win32') return;
@@ -453,7 +470,16 @@ function connectServicePipe() {
     let lines = buffer.split('\n');
     buffer = lines.pop();
     for (const line of lines) {
-      handleServiceEvent(line.trim());
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed.startsWith('WTS_') || (trimmed.indexOf(' ') !== -1 && trimmed.split(' ')[0].startsWith('WTS_'))) {
+        handleServiceEvent(trimmed);
+      } else {
+        const req = pendingIpcRequests.shift();
+        if (req) {
+          req.resolve(trimmed);
+        }
+      }
     }
   });
 
@@ -469,6 +495,10 @@ function connectServicePipe() {
     if (servicePipeConnected) {
       console.log('Service pipe connection closed');
       servicePipeConnected = false;
+    }
+    while (pendingIpcRequests.length > 0) {
+      const req = pendingIpcRequests.shift();
+      req.resolve('ERROR|Pipe disconnected');
     }
     setTimeout(connectServicePipe, 5000);
   });
@@ -1207,43 +1237,242 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('RequestFileDownload', async (filePath, engineerConnId) => {
-    try {
-      if (fs.existsSync(filePath)) {
-        const fileBuffer = fs.readFileSync(filePath);
-        const { Blob } = require('buffer');
-        const fileBlob = new Blob([fileBuffer]);
-        const formData = new FormData();
-        formData.append('file', fileBlob, path.basename(filePath));
+    console.log(`[RequestFileDownload] Initiating chunk-based download for ${filePath}`);
+    const crypto = require('crypto');
+    const transferId = crypto.randomUUID();
+    const fileName = path.basename(filePath);
+    const chunkSize = 256 * 1024; // 256 KB chunks
 
-        const response = await axios.post(`${SERVER_URL}/api/files/upload`, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          }
-        });
+    let offset = 0;
+    let fileHash = crypto.createHash('sha256');
+    let useService = (process.platform === 'win32' && servicePipeConnected);
 
-        if (response.status === 200) {
-          const { fileId, fileName } = response.data;
-          await signalRConnection.invoke('FileDownloadReady', engineerConnId, fileId, fileName);
+    let fd = null;
+    let fileLength = 0;
+    if (!useService) {
+      try {
+        if (!fs.existsSync(filePath)) {
+          console.error(`File does not exist: ${filePath}`);
+          return;
         }
+        fd = fs.openSync(filePath, 'r');
+        fileLength = fs.statSync(filePath).size;
+      } catch (err) {
+        console.error('Failed to open file locally:', err.message);
+        return;
+      }
+    }
+
+    try {
+      while (true) {
+        let chunkBuffer = null;
+        let chunkHash = '';
+
+        if (useService) {
+          const resp = await sendServiceIpcRequest(`READ|${transferId}|${filePath}|${offset}|${chunkSize}`);
+          if (resp === 'EOF') {
+            break;
+          }
+          if (resp.startsWith('ERROR|')) {
+            throw new Error(resp.substring(6));
+          }
+          if (resp.startsWith('OK|')) {
+            const parts = resp.split('|');
+            chunkHash = parts[1];
+            chunkBuffer = Buffer.from(parts[2], 'base64');
+          } else {
+            throw new Error(`Unexpected IPC response: ${resp}`);
+          }
+        } else {
+          if (offset >= fileLength) break;
+          const readBuf = Buffer.alloc(Math.min(chunkSize, fileLength - offset));
+          const bytesRead = fs.readSync(fd, readBuf, 0, readBuf.length, offset);
+          if (bytesRead <= 0) break;
+          chunkBuffer = readBuf.subarray(0, bytesRead);
+          chunkHash = crypto.createHash('sha256').update(chunkBuffer).digest('hex');
+        }
+
+        fileHash.update(chunkBuffer);
+
+        let success = false;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const { Blob } = require('buffer');
+            const blob = new Blob([chunkBuffer]);
+            const formData = new FormData();
+            formData.append('transferId', transferId);
+            formData.append('offset', offset.toString());
+            formData.append('hash', chunkHash);
+            formData.append('chunk', blob, 'chunk.bin');
+
+            const uploadResp = await axios.post(`${SERVER_URL}/api/files/upload/chunk`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' }
+            });
+
+            if (uploadResp.status === 200) {
+              success = true;
+              break;
+            }
+          } catch (uploadErr) {
+            console.warn(`Upload chunk offset ${offset} failed (attempt ${attempt}/3):`, uploadErr.message);
+          }
+        }
+
+        if (!success) {
+          throw new Error(`Failed to upload chunk at offset ${offset} after 3 attempts.`);
+        }
+
+        offset += chunkBuffer.length;
+      }
+
+      if (fd !== null) {
+        fs.closeSync(fd);
+        fd = null;
+      }
+
+      const finalHash = fileHash.digest('hex');
+      const commitResp = await axios.post(`${SERVER_URL}/api/files/upload/commit`, {
+        transferId: transferId,
+        fileName: fileName,
+        expectedHash: finalHash
+      });
+
+      if (commitResp.status === 200) {
+        const { fileId, fileName: committedName } = commitResp.data;
+        console.log(`[RequestFileDownload] Successfully uploaded all chunks for ${filePath}. Triggering FileDownloadReady.`);
+        await signalRConnection.invoke('FileDownloadReady', engineerConnId, fileId, committedName);
       }
     } catch (e) {
-      console.error('File download processing failed:', e.message);
+      console.error('[RequestFileDownload] Chunk-based transfer failed:', e.message);
+      if (fd !== null) {
+        try { fs.closeSync(fd); } catch {}
+      }
     }
   });
 
   signalRConnection.on('ReceiveFileFromAdmin', async (fileId, fileName, targetFolder, engineerConnId) => {
+    console.log(`[ReceiveFileFromAdmin] Downloading file ${fileName} chunk-by-chunk...`);
+    const crypto = require('crypto');
+    const transferId = crypto.randomUUID();
+    const targetPath = path.join(targetFolder, fileName);
+    const chunkSize = 256 * 1024; // 256 KB chunks
+
+    let offset = 0;
+    let fileHash = crypto.createHash('sha256');
+    let useService = (process.platform === 'win32' && servicePipeConnected);
+
+    let fd = null;
+    let localTempPath = '';
+    if (!useService) {
+      try {
+        const tempDir = path.join(os.tmpdir(), 'ITConnectTransfers');
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
+        }
+        localTempPath = path.join(tempDir, `${transferId}.tmp`);
+        fd = fs.openSync(localTempPath, 'w');
+      } catch (err) {
+        console.error('Failed to initialize local temp file:', err.message);
+        return;
+      }
+    }
+
     try {
-      const targetPath = path.join(targetFolder, fileName);
-      console.log(`Downloading file ${fileName} from admin to ${targetPath}...`);
-      const downloadUrl = `${SERVER_URL}/api/files/download/${fileId}?name=${encodeURIComponent(fileName)}`;
-      const response = await axios.get(downloadUrl, { responseType: 'arraybuffer' });
-      fs.writeFileSync(targetPath, Buffer.from(response.data));
-      console.log('File download completed successfully');
+      while (true) {
+        let chunkBuffer = null;
+        let chunkHash = '';
+
+        let success = false;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const downloadUrl = `${SERVER_URL}/api/files/download/chunk/${fileId}?offset=${offset}&size=${chunkSize}`;
+            const response = await axios.get(downloadUrl, { responseType: 'arraybuffer' });
+            
+            if (response.status === 204 || !response.data || response.data.byteLength === 0) {
+              success = true;
+              chunkBuffer = Buffer.alloc(0);
+              break;
+            }
+
+            if (response.status === 200) {
+              success = true;
+              chunkBuffer = Buffer.from(response.data);
+              chunkHash = response.headers['x-chunk-hash'];
+              break;
+            }
+          } catch (err) {
+            console.warn(`Download chunk offset ${offset} failed (attempt ${attempt}/3):`, err.message);
+          }
+        }
+
+        if (!success) {
+          throw new Error(`Failed to download chunk at offset ${offset} after 3 attempts.`);
+        }
+
+        if (chunkBuffer.length === 0) {
+          break; // EOF
+        }
+
+        fileHash.update(chunkBuffer);
+
+        if (useService) {
+          const base64Data = chunkBuffer.toString('base64');
+          const resp = await sendServiceIpcRequest(`WRITE|${transferId}|${targetPath}|${offset}|${chunkHash}|${base64Data}`);
+          if (resp !== 'OK') {
+            throw new Error(`Service chunk write failed: ${resp}`);
+          }
+        } else {
+          fs.writeSync(fd, chunkBuffer, 0, chunkBuffer.length, offset);
+        }
+
+        offset += chunkBuffer.length;
+      }
+
+      const finalHash = fileHash.digest('hex');
+
+      if (useService) {
+        const resp = await sendServiceIpcRequest(`COMMIT|${transferId}|${finalHash}`);
+        if (resp !== 'OK') {
+          throw new Error(`Service commit failed: ${resp}`);
+        }
+      } else {
+        if (fd !== null) {
+          fs.closeSync(fd);
+          fd = null;
+        }
+
+        const computedHash = crypto.createHash('sha256').update(fs.readFileSync(localTempPath)).digest('hex');
+        if (computedHash !== finalHash) {
+          fs.unlinkSync(localTempPath);
+          throw new Error('Integrity check failed on downloaded local file.');
+        }
+
+        if (fs.existsSync(targetPath)) {
+          fs.unlinkSync(targetPath);
+        }
+        fs.renameSync(localTempPath, targetPath);
+      }
+
+      console.log(`[ReceiveFileFromAdmin] File download chunk-by-chunk completed successfully.`);
+      
+      try {
+        await axios.delete(`${SERVER_URL}/api/files/cleanup/${fileId}`);
+      } catch (cleanupErr) {
+        console.warn('Failed to cleanup file on server:', cleanupErr.message);
+      }
 
       const listing = await listDirectory(targetFolder);
       await signalRConnection.invoke('SendDirectoryListing', engineerConnId, JSON.stringify(listing));
     } catch (e) {
-      console.error('ReceiveFileFromAdmin failed:', e.message);
+      console.error('[ReceiveFileFromAdmin] Chunk-based upload to agent failed:', e.message);
+      if (useService) {
+        await sendServiceIpcRequest(`CANCEL|${transferId}`).catch(() => {});
+      } else {
+        if (fd !== null) {
+          try { fs.closeSync(fd); } catch {}
+          try { fs.unlinkSync(localTempPath); } catch {}
+        }
+      }
     }
   });
 
@@ -1471,7 +1700,43 @@ async function executePowerCommand(command) {
 
 // ─── File System ──────────────────────────────────────────────────────────────
 async function listDirectory(dirPath) {
+  if (process.platform === 'win32' && servicePipeConnected) {
+    try {
+      if (!dirPath || dirPath.trim() === '' || dirPath.toLowerCase() === 'drives') {
+        const response = await sendServiceIpcRequest('DRIVES');
+        if (response.startsWith('OK|')) {
+          const drives = JSON.parse(response.substring(3));
+          return drives.map(d => ({
+            name: d,
+            isDirectory: true,
+            path: d,
+            size: 0,
+            modified: null
+          }));
+        } else {
+          throw new Error(response.substring(6));
+        }
+      } else {
+        const response = await sendServiceIpcRequest(`DIR|${dirPath}`);
+        if (response.startsWith('OK|')) {
+          return JSON.parse(response.substring(3));
+        } else {
+          throw new Error(response.substring(6));
+        }
+      }
+    } catch (err) {
+      console.warn('Windows Service directory listing failed, falling back to local user permissions:', err.message);
+    }
+  }
+
   try {
+    if (!dirPath || dirPath.trim() === '' || dirPath.toLowerCase() === 'drives') {
+      if (process.platform === 'win32') {
+        return [{ name: 'C:\\', isDirectory: true, path: 'C:\\', size: 0, modified: null }];
+      } else {
+        return [{ name: '/', isDirectory: true, path: '/', size: 0, modified: null }];
+      }
+    }
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
     const results = [];
     for (const e of entries) {
