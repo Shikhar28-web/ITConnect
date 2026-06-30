@@ -1713,13 +1713,18 @@ async function listDirectory(dirPath) {
             size: 0,
             modified: null
           }));
-        } else {
-          throw new Error(response.substring(6));
         }
       } else {
         const response = await sendServiceIpcRequest(`DIR|${dirPath}`);
         if (response.startsWith('OK|')) {
-          return JSON.parse(response.substring(3));
+          const rawList = JSON.parse(response.substring(3));
+          return rawList.map(item => ({
+            name: item.Name ?? item.name,
+            isDirectory: item.IsDirectory ?? item.isDirectory,
+            path: item.Path ?? item.path,
+            size: item.Size ?? item.size,
+            modified: item.LastModified ?? item.modified
+          }));
         } else {
           throw new Error(response.substring(6));
         }

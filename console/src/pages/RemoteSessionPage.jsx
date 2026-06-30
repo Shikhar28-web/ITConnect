@@ -269,6 +269,26 @@ function RemoteSessionPage() {
     return () => clearInterval(interval);
   }, [connected, deviceId]);
 
+  // Intercept paste events when focusing the remote viewer to support browser clipboard sync fallback
+  useEffect(() => {
+    const handlePaste = async (e) => {
+      if (activeTab !== 'remote' || !connected || !deviceId) return;
+      const text = e.clipboardData?.getData('text');
+      if (text) {
+        try {
+          lastClipboardRef.current = text;
+          await signalRService.syncClipboard(parseInt(deviceId), text);
+          console.log('[Clipboard] Synced via paste event:', text);
+        } catch (err) {
+          console.warn('[Clipboard] Failed to sync clipboard on paste:', err);
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [activeTab, connected, deviceId]);
+
   async function loadDevice() {
     const d = await devicesApi.getById(parseInt(deviceId));
     setDevice(d);
