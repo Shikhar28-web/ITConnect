@@ -68,3 +68,41 @@ ipcMain.handle('clipboard-read', () => clipboard.readText());
 ipcMain.handle('clipboard-write', (_, text) => clipboard.writeText(text));
 ipcMain.handle('get-displays', () => screen.getAllDisplays());
 ipcMain.handle('app-version', () => app.getVersion());
+ipcMain.handle('download-file-and-copy-to-clipboard', async (_, url, fileName) => {
+  const https = require('https');
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const { execSync } = require('child_process');
+
+  const tempDir = path.join(os.tmpdir(), 'ITConnectTransfers');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+
+  const localFilePath = path.join(tempDir, fileName);
+  const fileStream = fs.createWriteStream(localFilePath);
+
+  return new Promise((resolve, reject) => {
+    https.get(url, { rejectUnauthorized: false }, (response) => {
+      response.pipe(fileStream);
+      fileStream.on('finish', () => {
+        fileStream.close();
+        console.log('[Console Clipboard] Downloaded file to:', localFilePath);
+        try {
+          if (process.platform === 'win32') {
+            execSync(`powershell -NoProfile -Command "Set-Clipboard -Path '${localFilePath.replace(/'/g, "''")}'"`);
+            console.log('[Console Clipboard] File path written to local Windows clipboard.');
+          }
+          resolve(true);
+        } catch (err) {
+          console.error('[Console Clipboard] Failed to copy to clipboard:', err.message);
+          reject(err);
+        }
+      });
+    }).on('error', (err) => {
+      fs.unlink(localFilePath, () => {});
+      reject(err);
+    });
+  });
+});

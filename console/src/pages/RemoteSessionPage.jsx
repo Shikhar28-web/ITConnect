@@ -368,7 +368,20 @@ function RemoteSessionPage() {
         onRegistryData: (json) => {
           window.dispatchEvent(new CustomEvent('registry-data', { detail: JSON.parse(json) }));
         },
-        onClipboardData: (text) => {
+        onClipboardData: async (text) => {
+          try {
+            if (text.startsWith('{"type":"files",')) {
+              const data = JSON.parse(text);
+              toast.info(`Syncing ${data.paths.length} file(s) from remote clipboard...`);
+              for (const remotePath of data.paths) {
+                await signalRService.requestFileDownload(parseInt(deviceId), remotePath);
+              }
+              return;
+            }
+          } catch (e) {
+            // Ignore parse errors, treat as text
+          }
+
           lastClipboardRef.current = text;
           if (window.electronAPI) {
             window.electronAPI.clipboardWrite(text);
@@ -377,15 +390,25 @@ function RemoteSessionPage() {
           }
           toast.success('Clipboard synced from remote PC', { toastId: 'clipboard-sync' });
         },
-        onFileDownloadReady: (fileId, fileName) => {
+        onFileDownloadReady: async (fileId, fileName) => {
           const downloadUrl = `${BASE_URL}/api/files/download/${fileId}?name=${encodeURIComponent(fileName)}`;
-          const link = document.createElement('a');
-          link.href = downloadUrl;
-          link.setAttribute('download', fileName);
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-          toast.success(`Downloaded: ${fileName}`);
+          if (window.electronAPI && window.electronAPI.downloadFileAndCopyToClipboard) {
+            try {
+              await window.electronAPI.downloadFileAndCopyToClipboard(downloadUrl, fileName);
+              toast.success(`Copied to local clipboard: ${fileName}`);
+            } catch (err) {
+              console.error('Failed to copy downloaded file to local clipboard:', err.message);
+              toast.error(`Failed to copy ${fileName} to clipboard`);
+            }
+          } else {
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.setAttribute('download', fileName);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            toast.success(`Downloaded: ${fileName}`);
+          }
           setTransferringFile(null);
         },
         onSecureDesktopFrame: (base64Frame) => {

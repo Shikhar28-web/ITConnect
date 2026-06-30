@@ -1478,8 +1478,35 @@ async function connectSignalR() {
 
   signalRConnection.on('RequestClipboard', async (engineerConnId) => {
     try {
-      const text = require('electron').clipboard.readText();
-      await signalRConnection.invoke('ReturnClipboard', engineerConnId, text);
+      const electron = require('electron');
+      let text = '';
+      let filePaths = [];
+
+      if (process.platform === 'win32') {
+        try {
+          const child_process = require('child_process');
+          const psOut = child_process.execSync(
+            'powershell -NoProfile -Command "Get-Clipboard -Format FileDropList | ForEach-Object { $_.FullName }"',
+            { encoding: 'utf8' }
+          );
+          if (psOut && psOut.trim()) {
+            filePaths = psOut.split(/\r?\n/).filter(x => x.trim() !== '');
+          }
+        } catch (psErr) {
+          console.warn('PowerShell clipboard check failed:', psErr.message);
+        }
+      }
+
+      if (filePaths.length > 0) {
+        console.log('Files copied on agent clipboard:', filePaths);
+        await signalRConnection.invoke('ReturnClipboard', engineerConnId, JSON.stringify({
+          type: 'files',
+          paths: filePaths
+        }));
+      } else {
+        text = electron.clipboard.readText();
+        await signalRConnection.invoke('ReturnClipboard', engineerConnId, text);
+      }
     } catch (e) {
       console.error('RequestClipboard failed:', e.message);
     }
