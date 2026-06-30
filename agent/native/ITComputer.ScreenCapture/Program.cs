@@ -6,7 +6,6 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Text;
 using System.Threading;
-using System.Windows.Forms;
 
 namespace ITComputer.ScreenCapture;
 
@@ -129,10 +128,9 @@ class Program
 
         var thread = new System.Threading.Thread(() =>
         {
-            IntPtr hDesk = IntPtr.Zero;
             try
             {
-                hDesk = NativeMethods.OpenInputDesktop(0, false, 0x01FF);
+                IntPtr hDesk = NativeMethods.OpenInputDesktop(0, false, 0x01FF);
                 if (hDesk != IntPtr.Zero)
                 {
                     var sb = new StringBuilder(256);
@@ -152,6 +150,7 @@ class Program
                     {
                         Log($"SetThreadDesktop failed. Error: {Marshal.GetLastWin32Error()}");
                     }
+                    NativeMethods.CloseDesktop(hDesk);
                 }
                 else
                 {
@@ -185,13 +184,6 @@ class Program
             catch (Exception ex)
             {
                 Log($"Injection thread failed: {ex.Message}\n{ex.StackTrace}");
-            }
-            finally
-            {
-                if (hDesk != IntPtr.Zero)
-                {
-                    NativeMethods.CloseDesktop(hDesk);
-                }
             }
         });
         thread.Start();
@@ -269,43 +261,11 @@ class Program
                     Log($"Executing InjectKey: Keys='{keys}' (GetLastError: {Marshal.GetLastWin32Error()})");
                 }
                 break;
-            case "b":
-                if (parts.Length >= 2)
-                {
-                    bool enable = parts[1] == "1";
-                    Log($"Executing SetMonitorBlackout: {enable} (GetLastError: {Marshal.GetLastWin32Error()})");
-                    SetMonitorBlackout(enable);
-                }
-                break;
-        }
-    }
-
-    private static bool _blackoutActive = false;
-    private static System.Threading.Thread? _blackoutThread = null;
-
-    public static void SetMonitorBlackout(bool enable)
-    {
-        _blackoutActive = enable;
-        if (enable)
-        {
-            if (_blackoutThread == null || !_blackoutThread.IsAlive)
-            {
-                _blackoutThread = new System.Threading.Thread(() =>
-                {
-                    while (_blackoutActive)
-                    {
-                        // Send SC_MONITORPOWER (0xF170) with power off (2) to broadcast (0xFFFF)
-                        NativeMethods.SendMessage((IntPtr)0xFFFF, 0x0112, (IntPtr)0xF170, (IntPtr)2);
-                        System.Threading.Thread.Sleep(1000);
-                    }
-                }) { IsBackground = true };
-                _blackoutThread.Start();
-            }
         }
     }
 
     private static readonly object LogLock = new object();
-    public static void Log(string msg)
+    static void Log(string msg)
     {
         lock (LogLock)
         {
@@ -317,5 +277,3 @@ class Program
         }
     }
 }
-
-

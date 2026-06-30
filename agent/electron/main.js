@@ -395,11 +395,6 @@ function startSecureDesktopServer() {
     console.log('Secure desktop helper connected via TCP');
     secureDesktopSocket = socket;
 
-    if (privacyModeActive) {
-      console.log('[Blackout] Active secure desktop helper connected; immediately sending blackout command (b 1).');
-      socket.write("b 1\n");
-    }
-
     socket.setEncoding('utf8');
 
     let buffer = '';
@@ -1171,27 +1166,17 @@ async function connectSignalR() {
   });
 
   signalRConnection.on('SetBlackout', (enabled, progressInfo) => {
-    privacyModeActive = enabled;
-    console.log(`[Blackout] SetBlackout SignalR event: enabled=${enabled}`);
     if (enabled) {
       createBlackoutWindow(progressInfo);
       if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
         inputWorker.stdin.write("b 1\n");
         inputWorker.stdin.write("h\n");
       }
-      if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
-        console.log('[Blackout] Notifying secure desktop helper process to enable blackout.');
-        secureDesktopSocket.write("b 1\n");
-      }
     } else {
       destroyBlackoutWindow();
       if (process.platform === 'win32' && inputWorker && !inputWorker.killed) {
         inputWorker.stdin.write("b 0\n");
         inputWorker.stdin.write("r\n");
-      }
-      if (secureDesktopSocket && !secureDesktopSocket.destroyed) {
-        console.log('[Blackout] Notifying secure desktop helper process to disable blackout.');
-        secureDesktopSocket.write("b 0\n");
       }
     }
   });
