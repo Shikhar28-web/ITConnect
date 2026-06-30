@@ -310,7 +310,7 @@ class Program
 
 public class BlackoutWindow
 {
-    private static Form? _blackoutForm;
+    private static BlackoutForm? _blackoutForm;
     private static Thread? _windowThread;
     public static bool IsActive { get; private set; }
 
@@ -334,7 +334,7 @@ public class BlackoutWindow
                     NativeMethods.CloseDesktop(hDesk);
                 }
 
-                _blackoutForm = new Form
+                _blackoutForm = new BlackoutForm
                 {
                     BackColor = Color.Black,
                     FormBorderStyle = FormBorderStyle.None,
@@ -426,5 +426,21 @@ public class BlackoutWindow
             _blackoutForm = null;
         }
         _windowThread = null;
+    }
+}
+
+public class BlackoutForm : Form
+{
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            CreateParams cp = base.CreateParams;
+            // WS_EX_TRANSPARENT = 0x20 (Click-through)
+            // WS_EX_NOACTIVATE = 0x08000000 (No focus activation)
+            // WS_EX_TOPMOST = 0x8
+            cp.ExStyle |= 0x20 | 0x08000000 | 0x8;
+            return cp;
+        }
     }
 }
