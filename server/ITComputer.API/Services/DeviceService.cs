@@ -46,12 +46,24 @@ public class DeviceService : IDeviceService
 
     public async Task<DeviceDto> RegisterDeviceAsync(DeviceRegistrationRequest request)
     {
-        var existing = await _db.Devices.FirstOrDefaultAsync(d => d.MACAddress == request.MACAddress);
+        var existingByName = await _db.Devices.FirstOrDefaultAsync(d => d.Hostname == request.Hostname);
+        var existingByMac = await _db.Devices.FirstOrDefaultAsync(d => d.MACAddress == request.MACAddress);
+
+        if (existingByName != null && existingByMac != null && existingByName.Id != existingByMac.Id)
+        {
+            // Deduplicate (e.g. LAN vs WiFi duplicate registrations). Remove MAC-matched row to avoid unique constraint clash.
+            _db.Devices.Remove(existingByMac);
+            await _db.SaveChangesAsync();
+        }
+
+        var existing = existingByName ?? existingByMac;
+
         if (existing != null)
         {
-            // Update existing registration
+            // Update existing registration details
             existing.Hostname = request.Hostname;
             existing.IPAddress = request.IPAddress;
+            existing.MACAddress = request.MACAddress;
             existing.OS = ParseOS(request.OS);
             existing.OSVersion = request.OSVersion;
             existing.AgentVersion = request.AgentVersion;

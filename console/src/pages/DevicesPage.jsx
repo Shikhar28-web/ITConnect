@@ -181,7 +181,31 @@ function DevicesPage() {
     }
   }
 
-  const filtered = allDevices.filter(d => {
+  const getDeduplicatedDevices = (devicesList) => {
+    const sorted = [...devicesList].sort((a, b) => {
+      const getPriority = (status) => {
+        if (status === 'InSession') return 0;
+        if (status === 'Online') return 1;
+        return 2; // Offline
+      };
+      return getPriority(a.status) - getPriority(b.status);
+    });
+
+    const unique = [];
+    const seenHostnames = new Set();
+    for (const d of sorted) {
+      const hostKey = d.hostname.toLowerCase().trim();
+      if (!seenHostnames.has(hostKey)) {
+        seenHostnames.add(hostKey);
+        unique.push(d);
+      }
+    }
+    return unique.sort((a, b) => a.hostname.localeCompare(b.hostname));
+  };
+
+  const deduplicatedDevices = getDeduplicatedDevices(allDevices);
+
+  const filtered = deduplicatedDevices.filter(d => {
     const matchSearch = d.hostname.toLowerCase().includes(search.toLowerCase()) ||
       d.iPAddress.includes(search) ||
       d.assignedUser?.toLowerCase().includes(search.toLowerCase());
@@ -190,10 +214,10 @@ function DevicesPage() {
   });
 
   const counts = {
-    All: allDevices.length,
-    Online: allDevices.filter(d => d.status === 'Online').length,
-    Offline: allDevices.filter(d => d.status === 'Offline').length,
-    InSession: allDevices.filter(d => d.status === 'InSession').length,
+    All: deduplicatedDevices.length,
+    Online: deduplicatedDevices.filter(d => d.status === 'Online').length,
+    Offline: deduplicatedDevices.filter(d => d.status === 'Offline').length,
+    InSession: deduplicatedDevices.filter(d => d.status === 'InSession').length,
   };
 
   if (loading) return <div className="loading-overlay"><div className="loading-spinner lg" /></div>;
