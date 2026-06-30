@@ -1036,7 +1036,7 @@ function RemoteSessionPage() {
                   ref={imgRef}
                   src={`data:image/jpeg;base64,${secureDesktopFrame}`}
                   className="viewer-canvas"
-                  style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'default' }}
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none' }}
                   onMouseMove={handleMouseMove}
                   onMouseDown={handleMouseDown}
                   onMouseUp={handleMouseUp}
@@ -1051,7 +1051,7 @@ function RemoteSessionPage() {
                   autoPlay
                   playsInline
                   className="viewer-canvas"
-                  style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'default' }}
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none' }}
                   onMouseMove={handleMouseMove}
                   onMouseDown={handleMouseDown}
                   onMouseUp={handleMouseUp}
