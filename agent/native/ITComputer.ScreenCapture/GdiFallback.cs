@@ -23,8 +23,7 @@ public static class GdiCapture
                 NativeMethods.CloseDesktop(hDesk);
             }
 
-            IntPtr hwnd = NativeMethods.GetDesktopWindow();
-            IntPtr hdcSrc = NativeMethods.GetWindowDC(hwnd);
+            IntPtr hdcSrc = NativeMethods.CreateDC("DISPLAY", null, null, IntPtr.Zero);
 
             using (Bitmap bmp = new Bitmap(width, height))
             {
@@ -34,7 +33,7 @@ public static class GdiCapture
                     NativeMethods.BitBlt(hdcDest, 0, 0, width, height, hdcSrc, 0, 0, NativeMethods.SRCCOPY | NativeMethods.CAPTUREBLT);
                     g.ReleaseHdc(hdcDest);
                 }
-                NativeMethods.ReleaseDC(hwnd, hdcSrc);
+                NativeMethods.DeleteDC(hdcSrc);
 
                 using (MemoryStream ms = new MemoryStream())
                 {
