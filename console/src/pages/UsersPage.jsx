@@ -4,6 +4,7 @@ import { users as usersApi } from '../services/api';
 
 function UserModal({ user, onClose, onSave }) {
   const isEdit = !!user;
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     username: user?.username || '',
     email: user?.email || '',
@@ -16,6 +17,8 @@ function UserModal({ user, onClose, onSave }) {
   });
 
   const handleSubmit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     try {
       if (isEdit) {
         await usersApi.update(user.id, {
@@ -35,6 +38,8 @@ function UserModal({ user, onClose, onSave }) {
       onClose();
     } catch (e) {
       toast.error(e.response?.data?.message || 'Failed to save user');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -112,14 +117,14 @@ function UserModal({ user, onClose, onSave }) {
           )}
         </div>
         <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
           <button
             id="user-submit"
             className="btn btn-primary"
             onClick={handleSubmit}
-            disabled={!form.fullName || !form.email || (!isEdit && (!form.username || !form.password))}
+            disabled={submitting || !form.fullName || !form.email || (!isEdit && (!form.username || !form.password))}
           >
-            {isEdit ? 'Save Changes' : 'Create User'}
+            {submitting ? 'Saving...' : (isEdit ? 'Save Changes' : 'Create User')}
           </button>
         </div>
       </div>

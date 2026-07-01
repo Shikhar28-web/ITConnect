@@ -597,14 +597,17 @@ function GroupManagerDrawer({ groups, allDevices, allUsers, onGroupsChange, onCl
   const [editingGroup, setEditingGroup] = useState(null); // group id being edited
   const [editingName, setEditingName] = useState('');
   const [deviceSearch, setDeviceSearch] = useState('');
+  const [busy, setBusy] = useState(false);
 
   async function createGroup() {
+    if (busy) return;
     const name = newGroupName.trim();
     if (!name) return;
     if (groups.find(g => g.name.toLowerCase() === name.toLowerCase())) {
       toast.warn('A group with that name already exists');
       return;
     }
+    setBusy(true);
     try {
       await deviceGroups.create({ name });
       setNewGroupName('');
@@ -612,22 +615,31 @@ function GroupManagerDrawer({ groups, allDevices, allUsers, onGroupsChange, onCl
       onGroupsChange();
     } catch {
       toast.error('Failed to create group');
+    } finally {
+      setBusy(false);
     }
   }
 
   async function deleteGroup(groupId) {
+    if (busy) return;
+    if (!window.confirm('Are you sure you want to delete this group?')) return;
+    setBusy(true);
     try {
       await deviceGroups.delete(groupId);
       toast.success('Group deleted');
       onGroupsChange();
     } catch {
       toast.error('Failed to delete group');
+    } finally {
+      setBusy(false);
     }
   }
 
   async function renameGroup(groupId) {
+    if (busy) return;
     const name = editingName.trim();
     if (!name) return;
+    setBusy(true);
     try {
       await deviceGroups.update(groupId, { name });
       setEditingGroup(null);
@@ -635,31 +647,41 @@ function GroupManagerDrawer({ groups, allDevices, allUsers, onGroupsChange, onCl
       onGroupsChange();
     } catch {
       toast.error('Failed to rename group');
+    } finally {
+      setBusy(false);
     }
   }
 
   async function toggleDeviceInGroup(groupId, deviceId) {
+    if (busy) return;
     const group = groups.find(g => g.id === groupId);
     const has = group.deviceIds.includes(deviceId);
     const updatedDeviceIds = has ? group.deviceIds.filter(id => id !== deviceId) : [...group.deviceIds, deviceId];
+    setBusy(true);
     try {
       await deviceGroups.update(groupId, { deviceIds: updatedDeviceIds });
       onGroupsChange();
     } catch {
       toast.error('Failed to update group devices');
+    } finally {
+      setBusy(false);
     }
   }
 
   async function toggleUserInGroup(groupId, userId) {
+    if (busy) return;
     const group = groups.find(g => g.id === groupId);
     const allowedUserIds = group.allowedUserIds || [];
     const has = allowedUserIds.includes(userId);
     const updatedUserIds = has ? allowedUserIds.filter(id => id !== userId) : [...allowedUserIds, userId];
+    setBusy(true);
     try {
       await deviceGroups.update(groupId, { allowedUserIds: updatedUserIds });
       onGroupsChange();
     } catch {
       toast.error('Failed to update group permissions');
+    } finally {
+      setBusy(false);
     }
   }
 

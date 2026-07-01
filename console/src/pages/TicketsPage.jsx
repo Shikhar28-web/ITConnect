@@ -3,12 +3,15 @@ import { toast } from 'react-toastify';
 import { tickets as ticketsApi, devices } from '../services/api';
 
 function TicketModal({ ticket, onClose, onSave }) {
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     status: ticket?.status || 'Open',
     resolution: ticket?.resolution || '',
   });
 
   const handleUpdate = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     try {
       await ticketsApi.update(ticket.id, {
         status: form.status,
@@ -19,6 +22,8 @@ function TicketModal({ ticket, onClose, onSave }) {
       onClose();
     } catch {
       toast.error('Failed to update ticket');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -72,8 +77,10 @@ function TicketModal({ ticket, onClose, onSave }) {
           </div>
         </div>
         <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleUpdate}>Update Ticket</button>
+          <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleUpdate} disabled={submitting}>
+            {submitting ? 'Updating...' : 'Update Ticket'}
+          </button>
         </div>
       </div>
     </div>
@@ -82,6 +89,7 @@ function TicketModal({ ticket, onClose, onSave }) {
 
 function CreateTicketModal({ onClose, onSave }) {
   const [allDevices, setAllDevices] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     title: '', description: '', deviceId: '', category: 'Hardware',
     reporterName: '', reporterEmail: '', priority: 'Medium'
@@ -92,6 +100,8 @@ function CreateTicketModal({ onClose, onSave }) {
   }, []);
 
   const handleCreate = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     try {
       await ticketsApi.create({ ...form, deviceId: parseInt(form.deviceId) });
       toast.success('Ticket created');
@@ -99,6 +109,8 @@ function CreateTicketModal({ onClose, onSave }) {
       onClose();
     } catch {
       toast.error('Failed to create ticket');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -177,14 +189,14 @@ function CreateTicketModal({ onClose, onSave }) {
           </div>
         </div>
         <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Cancel</button>
           <button
             id="create-ticket-submit"
             className="btn btn-primary"
             onClick={handleCreate}
-            disabled={!form.title || !form.deviceId || !form.reporterName}
+            disabled={submitting || !form.title || !form.deviceId || !form.reporterName}
           >
-            Create Ticket
+            {submitting ? 'Creating...' : 'Create Ticket'}
           </button>
         </div>
       </div>
