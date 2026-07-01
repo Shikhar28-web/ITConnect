@@ -12,6 +12,8 @@ namespace ITComputer.ScreenCapture;
 class Program
 {
     static int Port = 59300;
+    private static IntPtr _currentDesktopHandle = IntPtr.Zero;
+    private static string _currentDesktopName = "";
 
     static void Main(string[] args)
     {
@@ -68,7 +70,7 @@ class Program
         {
             try
             {
-                string desktopName = GetActiveDesktopName();
+                string desktopName = AttachToInputDesktop();
                 if (desktopName != lastDesktopName)
                 {
                     writer.WriteLine($"desktop:{desktopName}");
@@ -90,24 +92,40 @@ class Program
         }
     }
 
-    static string GetActiveDesktopName()
+    static string AttachToInputDesktop()
     {
         IntPtr hDesk = NativeMethods.OpenInputDesktop(0, false, 0x01FF);
-        if (hDesk == IntPtr.Zero) return "unknown";
+        if (hDesk == IntPtr.Zero) return _currentDesktopName;
+
         try
         {
             var sb = new StringBuilder(256);
-            uint needed;
-            if (NativeMethods.GetUserObjectInformation(hDesk, 2, sb, (uint)sb.Capacity, out needed))
+            if (NativeMethods.GetUserObjectInformation(hDesk, 2, sb, (uint)sb.Capacity, out _))
             {
-                NativeMethods.SetThreadDesktop(hDesk);
-                return sb.ToString();
+                string newDeskName = sb.ToString();
+                if (newDeskName != _currentDesktopName)
+                {
+                    if (NativeMethods.SetThreadDesktop(hDesk))
+                    {
+                        if (_currentDesktopHandle != IntPtr.Zero)
+                        {
+                            NativeMethods.CloseDesktop(_currentDesktopHandle);
+                        }
+                        _currentDesktopHandle = hDesk;
+                        _currentDesktopName = newDeskName;
+                        hDesk = IntPtr.Zero;
+                    }
+                }
+                return _currentDesktopName;
             }
             return "unknown";
         }
         finally
         {
-            NativeMethods.CloseDesktop(hDesk);
+            if (hDesk != IntPtr.Zero)
+            {
+                NativeMethods.CloseDesktop(hDesk);
+            }
         }
     }
 

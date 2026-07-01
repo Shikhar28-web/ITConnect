@@ -16,13 +16,6 @@ public static class GdiCapture
             int width = bounds.Width;
             int height = bounds.Height;
 
-            IntPtr hDesk = NativeMethods.OpenInputDesktop(0, false, 0x0181);
-            if (hDesk != IntPtr.Zero)
-            {
-                NativeMethods.SetThreadDesktop(hDesk);
-                NativeMethods.CloseDesktop(hDesk);
-            }
-
             IntPtr hdcSrc = NativeMethods.CreateDC("DISPLAY", null, null, IntPtr.Zero);
 
             using (Bitmap bmp = new Bitmap(width, height))
