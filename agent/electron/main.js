@@ -408,6 +408,12 @@ function startSecureDesktopServer() {
         const trimmed = line.trim();
         if (trimmed.startsWith('desktop:')) {
           const desktopName = trimmed.substring(8);
+          const isSecureDesktop = desktopName !== 'Default' && desktopName !== 'unknown';
+          // Mute the WebRTC video track on the agent renderer to stop sending black frames
+          // when Windows switches to Winlogon/secure desktop (where Chromium DXGI capture fails)
+          try {
+            mainWindow?.webContents.send('set-webrtc-track-enabled', !isSecureDesktop);
+          } catch (e) {}
           if (signalRConnection && signalRConnection.state === 'Connected' && currentEngineerConnId) {
             signalRConnection.invoke('SendActiveDesktop', currentEngineerConnId, desktopName).catch(err => {
               console.error('Failed to send active desktop:', err.message);

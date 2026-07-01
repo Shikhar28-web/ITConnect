@@ -129,9 +129,24 @@ function App() {
       }
     });
 
+    // When secure desktop is detected (Winlogon), mute the WebRTC track so no black frames are sent
+    const unsubscribeWebRTCTrack = window.electronAPI.onSetWebRTCTrackEnabled?.((enabled) => {
+      if (peerRef.current) {
+        peerRef.current.getSenders().forEach(sender => {
+          if (sender.track && sender.track.kind === 'video') {
+            // Only override if not already controlled by privacy mode
+            if (!privacyModeRef.current) {
+              sender.track.enabled = enabled;
+            }
+          }
+        });
+      }
+    });
+
     return () => {
       if (unsubscribe) unsubscribe();
       if (unsubscribePrivacy) unsubscribePrivacy();
+      if (unsubscribeWebRTCTrack) unsubscribeWebRTCTrack();
       if (unsubscribeFileReceived) unsubscribeFileReceived();
       if (peerRef.current) peerRef.current.close();
     };

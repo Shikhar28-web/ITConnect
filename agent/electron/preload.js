@@ -24,6 +24,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('set-privacy-mode', subscription);
     return () => ipcRenderer.removeListener('set-privacy-mode', subscription);
   },
+  onSetWebRTCTrackEnabled: (callback) => {
+    const subscription = (_, enabled) => callback(enabled);
+    ipcRenderer.on('set-webrtc-track-enabled', subscription);
+    return () => ipcRenderer.removeListener('set-webrtc-track-enabled', subscription);
+  },
 
   // Remove listeners
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
