@@ -31,7 +31,8 @@ public record UserDto(
     bool IsActive,
     bool MFAEnabled,
     DateTime? LastLoginAt,
-    string? AvatarUrl);
+    string? AvatarUrl,
+    string Location);
 
 public record CreateUserRequest(
     string Username,
@@ -39,14 +40,22 @@ public record CreateUserRequest(
     string Password,
     string FullName,
     string Department,
-    UserRole Role);
+    UserRole Role,
+    string Location);
 
 public record UpdateUserRequest(
     string? Email,
     string? FullName,
     string? Department,
     UserRole? Role,
-    bool? IsActive);
+    bool? IsActive,
+    string? Location);
+
+// ─── Group DTOs ───────────────────────────────────────────────────────────────
+
+public record CreateGroupRequest(string Name);
+public record UpdateGroupRequest(string? Name, List<int>? DeviceIds, List<int>? AllowedUserIds);
+public record DeviceGroupDto(int Id, string Name, List<int> DeviceIds, List<int> AllowedUserIds);
 
 // ─── Device DTOs ─────────────────────────────────────────────────────────────
 

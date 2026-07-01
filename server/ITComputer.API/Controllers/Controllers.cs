@@ -2,6 +2,8 @@ using ITComputer.Core.DTOs;
 using ITComputer.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ITComputer.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace ITComputer.API.Controllers;
 
@@ -11,30 +13,93 @@ namespace ITComputer.API.Controllers;
 public class DevicesController : ControllerBase
 {
     private readonly IDeviceService _devices;
+    private readonly AppDbContext _db;
 
-    public DevicesController(IDeviceService devices) => _devices = devices;
+    public DevicesController(IDeviceService devices, AppDbContext db)
+    {
+        _devices = devices;
+        _db = db;
+    }
+
+    private async Task<HashSet<int>> GetAllowedDeviceIdsAsync()
+    {
+        var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? "";
+
+        if (role == "SuperAdmin")
+        {
+            return null;
+        }
+
+        var allowedDeviceIds = new HashSet<int>();
+        var groups = await _db.DeviceGroups.ToListAsync();
+        foreach (var g in groups)
+        {
+            try
+            {
+                var allowedUsers = System.Text.Json.JsonSerializer.Deserialize<List<int>>(g.AllowedUserIds) ?? new List<int>();
+                if (allowedUsers.Contains(userId))
+                {
+                    var deviceIds = System.Text.Json.JsonSerializer.Deserialize<List<int>>(g.DeviceIds) ?? new List<int>();
+                    foreach (var id in deviceIds)
+                    {
+                        allowedDeviceIds.Add(id);
+                    }
+                }
+            }
+            catch {}
+        }
+        return allowedDeviceIds;
+    }
 
     [HttpGet]
-    public async Task<IActionResult> GetAll() => Ok(await _devices.GetAllDevicesAsync());
+    public async Task<IActionResult> GetAll()
+    {
+        var allDevices = await _devices.GetAllDevicesAsync();
+        var allowed = await GetAllowedDeviceIdsAsync();
+        return Ok(allowed == null ? allDevices : allDevices.Where(d => allowed.Contains(d.Id)));
+    }
 
     [HttpGet("{id}")]
     public async Task<IActionResult> GetById(int id)
     {
+        var allowed = await GetAllowedDeviceIdsAsync();
+        if (allowed != null && !allowed.Contains(id))
+        {
+            return NotFound();
+        }
         var device = await _devices.GetDeviceByIdAsync(id);
         return device == null ? NotFound() : Ok(device);
     }
 
     [HttpGet("online")]
-    public async Task<IActionResult> GetOnline() => Ok(await _devices.GetOnlineDevicesAsync());
+    public async Task<IActionResult> GetOnline()
+    {
+        var onlineDevices = await _devices.GetOnlineDevicesAsync();
+        var allowed = await GetAllowedDeviceIdsAsync();
+        return Ok(allowed == null ? onlineDevices : onlineDevices.Where(d => allowed.Contains(d.Id)));
+    }
 
     [HttpGet("offline")]
-    public async Task<IActionResult> GetOffline() => Ok(await _devices.GetOfflineDevicesAsync());
+    public async Task<IActionResult> GetOffline()
+    {
+        var offlineDevices = await _devices.GetOfflineDevicesAsync();
+        var allowed = await GetAllowedDeviceIdsAsync();
+        return Ok(allowed == null ? offlineDevices : offlineDevices.Where(d => allowed.Contains(d.Id)));
+    }
 
     [HttpGet("ip/{ipAddress}")]
     public async Task<IActionResult> GetByIP(string ipAddress)
     {
         var device = await _devices.GetDeviceByIPAsync(ipAddress);
-        return device == null ? NotFound() : Ok(device);
+        if (device == null) return NotFound();
+
+        var allowed = await GetAllowedDeviceIdsAsync();
+        if (allowed != null && !allowed.Contains(device.Id))
+        {
+            return NotFound();
+        }
+        return Ok(device);
     }
 
     [HttpPost("register")]

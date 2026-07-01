@@ -40,6 +40,7 @@ public class UserService : IUserService
             FullName = request.FullName,
             Department = request.Department,
             Role = request.Role,
+            Location = request.Location,
             IsActive = true,
             CreatedAt = DateTime.UtcNow
         };
@@ -59,6 +60,7 @@ public class UserService : IUserService
         if (request.Department != null) user.Department = request.Department;
         if (request.Role.HasValue) user.Role = request.Role.Value;
         if (request.IsActive.HasValue) user.IsActive = request.IsActive.Value;
+        if (request.Location != null) user.Location = request.Location;
 
         await _db.SaveChangesAsync();
         return MapDto(user);
@@ -79,5 +81,5 @@ public class UserService : IUserService
     private static UserDto MapDto(User u) => new(
         u.Id, u.Username, u.Email, u.FullName,
         u.Department, u.Role.ToString(), u.IsActive,
-        u.MFAEnabled, u.LastLoginAt, u.AvatarUrl);
+        u.MFAEnabled, u.LastLoginAt, u.AvatarUrl, u.Location);
 }

@@ -27,6 +27,7 @@ public class User
     public string? LastLoginIP { get; set; }
     public string? AvatarUrl { get; set; }
     public string? PhoneNumber { get; set; }
+    public string Location { get; set; } = string.Empty;
 
     // Navigation
     public ICollection<RemoteSession> EngineerSessions { get; set; } = new List<RemoteSession>();

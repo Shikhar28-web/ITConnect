@@ -123,4 +123,12 @@ export const auditLogs = {
     api.get('/api/auditlogs', { params: { from, to, userId, action } }).then(r => r.data),
 };
 
+// ─── Device Groups ────────────────────────────────────────────────────────────
+export const deviceGroups = {
+  getAll: () => api.get('/api/devicegroups').then(r => r.data),
+  create: (data) => api.post('/api/devicegroups', data).then(r => r.data),
+  update: (id, data) => api.put(`/api/devicegroups/${id}`, data).then(r => r.data),
+  delete: (id) => api.delete(`/api/devicegroups/${id}`).then(r => r.data),
+};
+
 export default api;

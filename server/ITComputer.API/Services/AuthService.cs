@@ -237,5 +237,5 @@ public class AuthService : IAuthService
     private static UserDto MapUserDto(User user) => new(
         user.Id, user.Username, user.Email, user.FullName,
         user.Department, user.Role.ToString(), user.IsActive,
-        user.MFAEnabled, user.LastLoginAt, user.AvatarUrl);
+        user.MFAEnabled, user.LastLoginAt, user.AvatarUrl, user.Location);
 }

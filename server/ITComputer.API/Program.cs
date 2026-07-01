@@ -144,6 +144,26 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await db.Database.EnsureCreatedAsync();
+
+    // Auto-migrate SQLite schema
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"Location\" TEXT DEFAULT ''");
+    }
+    catch {}
+
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            CREATE TABLE IF NOT EXISTS ""DeviceGroups"" (
+                ""Id"" INTEGER PRIMARY KEY AUTOINCREMENT,
+                ""Name"" TEXT NOT NULL,
+                ""DeviceIds"" TEXT NOT NULL DEFAULT '[]',
+                ""AllowedUserIds"" TEXT NOT NULL DEFAULT '[]'
+            );
+        ");
+    }
+    catch {}
 }
 
 // ─── Middleware Pipeline ─────────────────────────────────────────────────────

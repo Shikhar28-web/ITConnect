@@ -12,6 +12,7 @@ function UserModal({ user, onClose, onSave }) {
     department: user?.department || '',
     role: user?.role || 'Engineer',
     isActive: user?.isActive ?? true,
+    location: user?.location || '12',
   });
 
   const handleSubmit = async () => {
@@ -23,6 +24,7 @@ function UserModal({ user, onClose, onSave }) {
           department: form.department,
           role: form.role,
           isActive: form.isActive,
+          location: form.location,
         });
         toast.success('User updated');
       } else {
@@ -87,6 +89,16 @@ function UserModal({ user, onClose, onSave }) {
                 ))}
               </select>
             </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Location</label>
+            <select id="user-location" className="form-input form-select" value={form.location}
+              onChange={e => setForm(f => ({ ...f, location: e.target.value }))}>
+              {['12', '78', '64', '13'].map(loc => (
+                <option key={loc} value={loc}>{loc}</option>
+              ))}
+            </select>
           </div>
 
           {isEdit && (
@@ -177,6 +189,7 @@ function UsersPage() {
               <th>User</th>
               <th>Email</th>
               <th>Department</th>
+              <th>Location</th>
               <th>Role</th>
               <th>MFA</th>
               <th>Status</th>
@@ -205,6 +218,7 @@ function UsersPage() {
                 </td>
                 <td style={{ fontSize: 13 }}>{u.email}</td>
                 <td>{u.department}</td>
+                <td><span className="badge badge-info">{u.location || '—'}</span></td>
                 <td><span className={`badge ${roleBadge(u.role)}`}>{u.role}</span></td>
                 <td>{u.mFAEnabled ? '🔐 On' : '—'}</td>
                 <td>

@@ -19,6 +19,7 @@ public class AppDbContext : DbContext
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<SoftwareDeployment> SoftwareDeployments => Set<SoftwareDeployment>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<DeviceGroup> DeviceGroups => Set<DeviceGroup>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -195,6 +196,7 @@ public class AppDbContext : DbContext
             Department = "IT",
             Role = UserRole.SuperAdmin,
             IsActive = true,
+            Location = "12",
             CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc)
         });
     }

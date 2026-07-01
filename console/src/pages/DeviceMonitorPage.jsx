@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { devices as devicesApi, sessions as sessionsApi } from '../services/api';
+import { devices as devicesApi, sessions as sessionsApi, deviceGroups, users as usersApi } from '../services/api';
 import { signalRService } from '../services/signalr';
 import * as signalR from '@microsoft/signalr';
 
@@ -592,49 +592,75 @@ function MonitorFocusModal({ focusData, onClose, navigate }) {
 }
 
 // ─── Group Manager Drawer ────────────────────────────────────────────────────
-function GroupManagerDrawer({ groups, allDevices, onGroupsChange, onClose }) {
+function GroupManagerDrawer({ groups, allDevices, allUsers, onGroupsChange, onClose }) {
   const [newGroupName, setNewGroupName] = useState('');
   const [editingGroup, setEditingGroup] = useState(null); // group id being edited
   const [editingName, setEditingName] = useState('');
   const [deviceSearch, setDeviceSearch] = useState('');
 
-  function createGroup() {
+  async function createGroup() {
     const name = newGroupName.trim();
     if (!name) return;
     if (groups.find(g => g.name.toLowerCase() === name.toLowerCase())) {
       toast.warn('A group with that name already exists');
       return;
     }
-    const newGroup = { id: Date.now().toString(), name, deviceIds: [] };
-    const updated = [...groups, newGroup];
-    onGroupsChange(updated);
-    setNewGroupName('');
-    toast.success(`Group "${name}" created`);
+    try {
+      await deviceGroups.create({ name });
+      setNewGroupName('');
+      toast.success(`Group "${name}" created`);
+      onGroupsChange();
+    } catch {
+      toast.error('Failed to create group');
+    }
   }
 
-  function deleteGroup(groupId) {
-    const updated = groups.filter(g => g.id !== groupId);
-    onGroupsChange(updated);
+  async function deleteGroup(groupId) {
+    try {
+      await deviceGroups.delete(groupId);
+      toast.success('Group deleted');
+      onGroupsChange();
+    } catch {
+      toast.error('Failed to delete group');
+    }
   }
 
-  function renameGroup(groupId) {
+  async function renameGroup(groupId) {
     const name = editingName.trim();
     if (!name) return;
-    const updated = groups.map(g => g.id === groupId ? { ...g, name } : g);
-    onGroupsChange(updated);
-    setEditingGroup(null);
+    try {
+      await deviceGroups.update(groupId, { name });
+      setEditingGroup(null);
+      toast.success('Group renamed');
+      onGroupsChange();
+    } catch {
+      toast.error('Failed to rename group');
+    }
   }
 
-  function toggleDeviceInGroup(groupId, deviceId) {
-    const updated = groups.map(g => {
-      if (g.id !== groupId) return g;
-      const has = g.deviceIds.includes(deviceId);
-      return {
-        ...g,
-        deviceIds: has ? g.deviceIds.filter(id => id !== deviceId) : [...g.deviceIds, deviceId]
-      };
-    });
-    onGroupsChange(updated);
+  async function toggleDeviceInGroup(groupId, deviceId) {
+    const group = groups.find(g => g.id === groupId);
+    const has = group.deviceIds.includes(deviceId);
+    const updatedDeviceIds = has ? group.deviceIds.filter(id => id !== deviceId) : [...group.deviceIds, deviceId];
+    try {
+      await deviceGroups.update(groupId, { deviceIds: updatedDeviceIds });
+      onGroupsChange();
+    } catch {
+      toast.error('Failed to update group devices');
+    }
+  }
+
+  async function toggleUserInGroup(groupId, userId) {
+    const group = groups.find(g => g.id === groupId);
+    const allowedUserIds = group.allowedUserIds || [];
+    const has = allowedUserIds.includes(userId);
+    const updatedUserIds = has ? allowedUserIds.filter(id => id !== userId) : [...allowedUserIds, userId];
+    try {
+      await deviceGroups.update(groupId, { allowedUserIds: updatedUserIds });
+      onGroupsChange();
+    } catch {
+      toast.error('Failed to update group permissions');
+    }
   }
 
   function getGroupForDevice(deviceId) {
@@ -766,6 +792,35 @@ function GroupManagerDrawer({ groups, allDevices, onGroupsChange, onClose }) {
                 {allDevices.length === 0 && (
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 0' }}>No devices available</div>
                 )}
+              {/* Allowed Users assignment checkboxes */}
+              <div style={{ padding: '4px 0', borderBottom: '1px solid var(--border-hover)', margin: '12px 0 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>👥 User Access Permissions</span>
+              </div>
+              <div className="group-device-list" style={{ maxHeight: 120 }}>
+                {allUsers.filter(u => u.role !== 'SuperAdmin').map(user => {
+                  const isAllowed = (group.allowedUserIds || []).includes(user.id);
+                  return (
+                    <label
+                      key={user.id}
+                      className={`group-device-item ${isAllowed ? 'selected' : ''}`}
+                      style={{ padding: '4px 8px', fontSize: 12 }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isAllowed}
+                        onChange={() => toggleUserInGroup(group.id, user.id)}
+                        style={{ accentColor: 'var(--accent-blue)' }}
+                      />
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+                        <span style={{ fontWeight: 500 }}>{user.fullName}</span>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>@{user.username} · {user.role}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+                {allUsers.filter(u => u.role !== 'SuperAdmin').length === 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '4px 0' }}>No standard users to configure</div>
+                )}
               </div>
             </div>
           ))}
@@ -819,7 +874,8 @@ function DeviceMonitorPage() {
   const navigate = useNavigate();
   const [allDevices, setAllDevices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [groups, setGroups] = useState(loadGroups);
+  const [groups, setGroups] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
   const [focusData, setFocusData] = useState(null); // { device, videoRef, hubRef, pcRef }
   const [showGroupManager, setShowGroupManager] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState({});
@@ -829,6 +885,8 @@ function DeviceMonitorPage() {
 
   useEffect(() => {
     loadDevices();
+    loadGroupsFromApi();
+    loadUsers();
     const interval = setInterval(loadDevices, 30000);
     return () => clearInterval(interval);
   }, []);
@@ -844,9 +902,22 @@ function DeviceMonitorPage() {
     }
   }
 
-  function handleGroupsChange(updated) {
-    setGroups(updated);
-    saveGroups(updated);
+  async function loadGroupsFromApi() {
+    try {
+      const data = await deviceGroups.getAll();
+      setGroups(data);
+    } catch {}
+  }
+
+  async function loadUsers() {
+    try {
+      const data = await usersApi.getAll();
+      setAllUsers(data);
+    } catch {}
+  }
+
+  function handleGroupsChange() {
+    loadGroupsFromApi();
   }
 
   function toggleGroupCollapse(groupId) {
@@ -1009,6 +1080,7 @@ function DeviceMonitorPage() {
         <GroupManagerDrawer
           groups={groups}
           allDevices={allDevices}
+          allUsers={allUsers}
           onGroupsChange={handleGroupsChange}
           onClose={() => setShowGroupManager(false)}
         />
