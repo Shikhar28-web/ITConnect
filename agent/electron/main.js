@@ -8,8 +8,9 @@ const axios = require('axios/dist/node/axios.cjs');
 
 // Disable SSL/TLS validation for self-signed certificates in local/LAN environments
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('ignore-certificate-errors');
-app.commandLine.appendSwitch('disable-features', 'AllowWgcScreenCapturer,AllowWgcWindowCapturer,AllowWgcDesktopCapture,AllowWgcWindowCapture');
+app.commandLine.appendSwitch('disable-features', 'WebRtcUseDxgiCapturer,AllowWgcScreenCapturer,AllowWgcWindowCapturer,AllowWgcDesktopCapture,AllowWgcWindowCapture');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 function loadServerUrl() {
@@ -552,10 +553,12 @@ function requestSasFromService() {
 
 function launchSecureDesktopHelper() {
   if (secureDesktopHelperProcess) return;
+  /*
   if (servicePipeConnected) {
     console.log('Windows Service is connected. Skipping local user-level screen capture helper.');
     return;
   }
+  */
 
   // Use native .NET ScreenCapture exe if available (preferred), else fall back to PS1
   const nativeExePath = path.join(__dirname, '../native/ITComputer.ScreenCapture/bin/Release/net10.0-windows/win-x64/ITComputer.ScreenCapture.exe');

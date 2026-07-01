@@ -191,6 +191,7 @@ function RemoteSessionPage() {
   const [keepAwake, setKeepAwake] = useState(false);
   const [secureDesktopActive, setSecureDesktopActive] = useState(false);
   const [secureDesktopFrame, setSecureDesktopFrame] = useState(null);
+  const [useJpegFallback, setUseJpegFallback] = useState(false);
   const [activeDesktopName, setActiveDesktopName] = useState('Default');
   const imgRef = useRef(null);
 
@@ -608,7 +609,7 @@ function RemoteSessionPage() {
   }, []);
 
   const handleMouseMove = useCallback((e) => {
-    if (annotation || (!connected && !secureDesktopActive)) return;
+    if (annotation || (!connected && !secureDesktopActive && !useJpegFallback)) return;
     const now = Date.now();
     if (now - lastMouseMoveTime.current < 25) return; // Throttle to 40 events per second
     lastMouseMoveTime.current = now;
@@ -621,10 +622,10 @@ function RemoteSessionPage() {
     } else {
       signalRService.sendMouseMove(parseInt(deviceId), coords.x, coords.y);
     }
-  }, [annotation, connected, deviceId, secureDesktopActive]);
+  }, [annotation, connected, deviceId, secureDesktopActive, useJpegFallback]);
 
   const handleMouseDown = useCallback((e) => {
-    if (annotation || (!connected && !secureDesktopActive)) return;
+    if (annotation || (!connected && !secureDesktopActive && !useJpegFallback)) return;
     const coords = getMouseCoords(e);
     if (!coords) return;
 
@@ -633,10 +634,10 @@ function RemoteSessionPage() {
     } else {
       signalRService.sendMouseDown(parseInt(deviceId), coords.x, coords.y, e.button);
     }
-  }, [annotation, connected, deviceId, secureDesktopActive]);
+  }, [annotation, connected, deviceId, secureDesktopActive, useJpegFallback]);
 
   const handleMouseUp = useCallback((e) => {
-    if (annotation || (!connected && !secureDesktopActive)) return;
+    if (annotation || (!connected && !secureDesktopActive && !useJpegFallback)) return;
     const coords = getMouseCoords(e);
     if (!coords) return;
 
@@ -647,17 +648,17 @@ function RemoteSessionPage() {
     } else {
       signalRService.sendMouseUp(parseInt(deviceId), coords.x, coords.y, e.button);
     }
-  }, [annotation, connected, deviceId, secureDesktopActive]);
+  }, [annotation, connected, deviceId, secureDesktopActive, useJpegFallback]);
 
   const handleWheel = useCallback((e) => {
-    if (annotation || (!connected && !secureDesktopActive)) return;
+    if (annotation || (!connected && !secureDesktopActive && !useJpegFallback)) return;
     const delta = e.deltaY > 0 ? -120 : 120;
     if (secureDesktopActive) {
       signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({ type: 'wheel', delta }));
     } else {
       signalRService.sendMouseWheel(parseInt(deviceId), delta);
     }
-  }, [annotation, connected, deviceId, secureDesktopActive]);
+  }, [annotation, connected, deviceId, secureDesktopActive, useJpegFallback]);
 
   // Drag and Drop files directly onto the viewer canvas
   const handleDragOver = (e) => {
@@ -698,7 +699,7 @@ function RemoteSessionPage() {
   };
 
   const handleKeyDown = useCallback(async (e) => {
-    if ((!connected && !secureDesktopActive) || document.activeElement.tagName === 'INPUT') return;
+    if ((!connected && !secureDesktopActive && !useJpegFallback) || document.activeElement.tagName === 'INPUT') return;
     e.preventDefault();
     if (secureDesktopActive) {
       await signalRService.sendSecureDesktopInput(parseInt(deviceId), JSON.stringify({
@@ -715,7 +716,7 @@ function RemoteSessionPage() {
         e.ctrlKey, e.altKey, e.shiftKey
       );
     }
-  }, [connected, deviceId, secureDesktopActive]);
+  }, [connected, deviceId, secureDesktopActive, useJpegFallback]);
 
   // Annotation canvas
   function startDraw(e) {
@@ -829,6 +830,12 @@ function RemoteSessionPage() {
                   title="File Transfer Sidebar"
                   onClick={() => setShowFileTransferSidebar(!showFileTransferSidebar)}
                 >📂⇄</button>
+                <button
+                  className={`toolbar-btn ${useJpegFallback ? 'active' : ''}`}
+                  title="Force JPEG screen stream (use if WebRTC shows a black screen)"
+                  onClick={() => setUseJpegFallback(!useJpegFallback)}
+                  style={{ width: 'auto', padding: '0 8px', display: 'flex', gap: '4px', fontSize: '12px', marginRight: '6px' }}
+                >🖼️ {useJpegFallback ? 'Disable JPEG' : 'Use JPEG Stream'}</button>
                 <button
                   className="toolbar-btn"
                   title="Reconnect Stream"
@@ -1070,7 +1077,7 @@ function RemoteSessionPage() {
                   SECURE DESKTOP ACTIVE ({activeDesktopName.toUpperCase()})
                 </div>
               )}
-              {secureDesktopActive && secureDesktopFrame ? (
+              {(secureDesktopActive || useJpegFallback) && secureDesktopFrame ? (
                 <img
                   ref={imgRef}
                   src={`data:image/jpeg;base64,${secureDesktopFrame}`}
