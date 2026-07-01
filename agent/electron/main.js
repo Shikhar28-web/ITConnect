@@ -567,13 +567,13 @@ function launchSecureDesktopHelper() {
 
   if (fs.existsSync(nativeExePath)) {
     console.log('Launching native DXGI screen capture process...');
-    secureDesktopHelperProcess = spawn(nativeExePath, [port.toString()]);
+    secureDesktopHelperProcess = spawn(nativeExePath, [port.toString()], { windowsHide: true });
   } else {
     console.log('Native capture not found, falling back to PowerShell helper...');
     secureDesktopHelperProcess = spawn('powershell', [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', ps1Path, '-Port', port.toString()
-    ]);
+    ], { windowsHide: true });
   }
 
   secureDesktopHelperProcess.on('error', (spawnErr) => {

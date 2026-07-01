@@ -191,7 +191,7 @@ function RemoteSessionPage() {
   const [keepAwake, setKeepAwake] = useState(false);
   const [secureDesktopActive, setSecureDesktopActive] = useState(false);
   const [secureDesktopFrame, setSecureDesktopFrame] = useState(null);
-  const [useJpegFallback, setUseJpegFallback] = useState(false);
+  const [useJpegFallback, setUseJpegFallback] = useState(true);
   const [activeDesktopName, setActiveDesktopName] = useState('Default');
   const imgRef = useRef(null);
 
@@ -831,12 +831,6 @@ function RemoteSessionPage() {
                   onClick={() => setShowFileTransferSidebar(!showFileTransferSidebar)}
                 >📂⇄</button>
                 <button
-                  className={`toolbar-btn ${useJpegFallback ? 'active' : ''}`}
-                  title="Force JPEG screen stream (use if WebRTC shows a black screen)"
-                  onClick={() => setUseJpegFallback(!useJpegFallback)}
-                  style={{ width: 'auto', padding: '0 8px', display: 'flex', gap: '4px', fontSize: '12px', marginRight: '6px' }}
-                >🖼️ {useJpegFallback ? 'Disable JPEG' : 'Use JPEG Stream'}</button>
-                <button
                   className="toolbar-btn"
                   title="Reconnect Stream"
                   onClick={handleReconnect}
@@ -1077,7 +1071,7 @@ function RemoteSessionPage() {
                   SECURE DESKTOP ACTIVE ({activeDesktopName.toUpperCase()})
                 </div>
               )}
-              {(secureDesktopActive || useJpegFallback) && secureDesktopFrame ? (
+              {(secureDesktopActive || (!connected && useJpegFallback)) && secureDesktopFrame ? (
                 <img
                   ref={imgRef}
                   src={`data:image/jpeg;base64,${secureDesktopFrame}`}

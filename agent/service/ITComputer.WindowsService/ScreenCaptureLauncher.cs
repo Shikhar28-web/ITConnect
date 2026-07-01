@@ -218,7 +218,7 @@ public class ScreenCaptureLauncher
                     IntPtr.Zero,
                     IntPtr.Zero,
                     false,
-                    0,
+                    0x08000000, // CREATE_NO_WINDOW
                     IntPtr.Zero,
                     null,
                     ref si,
