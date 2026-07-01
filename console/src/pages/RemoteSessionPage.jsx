@@ -497,7 +497,8 @@ function RemoteSessionPage() {
             setSecureDesktopActive(true);
           } else {
             setSecureDesktopActive(false);
-            // Debounce clearing the secure desktop frame by 1.5 seconds to prevent black flickering during rapid logon desktop handshakes
+            // Debounce clearing the secure desktop frame by 3 seconds to cover the DXGI 3-second reset cooldown
+            // This prevents black flickering during rapid logon desktop handshakes (Winlogon <-> Default switches)
             setTimeout(() => {
               setActiveDesktopName(current => {
                 if (current === 'Default' || current === 'unknown') {
@@ -505,7 +506,7 @@ function RemoteSessionPage() {
                 }
                 return current;
               });
-            }, 1500);
+            }, 3000);
           }
         }
       });

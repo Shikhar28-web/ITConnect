@@ -63,9 +63,15 @@ class Program
         }
     }
 
+    // Cache of the last successfully captured frame – resent when capture fails to prevent black flickering
+    static byte[]? _lastGoodFrame = null;
+    // Timestamp of when the desktop last changed – used to decide when to clear the frame cache
+    static DateTime _lastDesktopChangeTime = DateTime.MinValue;
+
     static void CaptureLoop(StreamWriter writer, CancellationToken ct)
     {
         string lastDesktopName = "";
+        int failedFramesInRow = 0;
         while (!ct.IsCancellationRequested)
         {
             try
@@ -75,13 +81,33 @@ class Program
                 {
                     writer.WriteLine($"desktop:{desktopName}");
                     lastDesktopName = desktopName;
+                    _lastDesktopChangeTime = DateTime.UtcNow;
+                    // Clear cached frame only when returning to Default desktop so we don't show a stale secure desktop image
+                    if (desktopName == "Default" || desktopName == "unknown")
+                    {
+                        _lastGoodFrame = null;
+                    }
+                    failedFramesInRow = 0;
                 }
 
                 byte[] frame = CaptureCurrentDesktop();
                 if (frame != null && frame.Length > 0)
                 {
+                    _lastGoodFrame = frame;
+                    failedFramesInRow = 0;
                     string b64 = Convert.ToBase64String(frame);
                     writer.WriteLine($"frame:{b64}");
+                }
+                else
+                {
+                    failedFramesInRow++;
+                    // Re-send the last known good frame to keep the console display stable
+                    // Only skip the first 2 failures (may be a genuine timeout/no-change) to avoid sending duplicate frames on a static screen
+                    if (_lastGoodFrame != null && failedFramesInRow > 2)
+                    {
+                        string b64 = Convert.ToBase64String(_lastGoodFrame);
+                        writer.WriteLine($"frame:{b64}");
+                    }
                 }
             }
             catch (Exception ex)
