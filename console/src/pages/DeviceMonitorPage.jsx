@@ -732,8 +732,10 @@ function GroupManagerDrawer({ groups, allDevices, onGroupsChange, onClose }) {
                         style={{ accentColor: 'var(--accent-blue)' }}
                       />
                       <span className={`status-dot ${device.status.toLowerCase()}`} />
-                      <span style={{ flex: 1, fontSize: 13 }}>{device.hostname}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{device.iPAddress}</span>
+                      <span style={{ flex: 1, fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontWeight: 500 }}>{device.hostname}</span>
+                        <span style={{ fontSize: 11, color: 'var(--accent-blue)', fontFamily: 'monospace' }}>({device.iPAddress})</span>
+                      </span>
                       {inOtherGroup && (
                         <span style={{ fontSize: 10, color: 'var(--accent-orange)', marginLeft: 4 }}>
                           ({getGroupForDevice(device.id)?.name})
