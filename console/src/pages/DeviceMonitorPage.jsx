@@ -792,6 +792,8 @@ function GroupManagerDrawer({ groups, allDevices, allUsers, onGroupsChange, onCl
                 {allDevices.length === 0 && (
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 0' }}>No devices available</div>
                 )}
+              </div>
+
               {/* Allowed Users assignment checkboxes */}
               <div style={{ padding: '4px 0', borderBottom: '1px solid var(--border-hover)', margin: '12px 0 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>👥 User Access Permissions</span>
