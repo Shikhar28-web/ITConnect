@@ -114,7 +114,7 @@ function AuditLogsPage() {
                 </td>
                 <td style={{ fontSize: 13 }}>{log.target}</td>
                 <td style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--text-muted)' }}>
-                  {log.iPAddress}
+                  {log.ipAddress}
                 </td>
                 <td>
                   {log.isSuccess

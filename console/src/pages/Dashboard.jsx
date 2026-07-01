@@ -112,7 +112,7 @@ function Dashboard() {
                 }}>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 13 }}>{d.hostname}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{d.iPAddress}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{d.ipAddress}</div>
                   </div>
                   {d.metrics && (
                     <div style={{ display: 'flex', gap: 8, fontSize: 11, color: 'var(--text-muted)' }}>

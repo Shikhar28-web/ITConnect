@@ -24,7 +24,7 @@ function DeviceCard({ device, onConnect, onWoL, onAuthorize }) {
       <div className="device-card-header">
         <div>
           <div className="device-name">{device.hostname}</div>
-          <div className="device-ip">{device.iPAddress} · {device.oS}</div>
+          <div className="device-ip">{device.ipAddress} · {device.oS}</div>
         </div>
         <span className={`badge ${badgeClass}`}>
           ● {device.status}
@@ -163,7 +163,7 @@ function DevicesPage() {
 
   async function handleWoL(device) {
     try {
-      const broadcastIP = device.iPAddress.split('.').slice(0, 3).join('.') + '.255';
+      const broadcastIP = device.ipAddress.split('.').slice(0, 3).join('.') + '.255';
       await devices.wakeOnLan(device.mACAddress, broadcastIP);
       toast.success(`Wake-on-LAN sent to ${device.hostname}`);
     } catch (e) {
@@ -207,7 +207,7 @@ function DevicesPage() {
 
   const filtered = deduplicatedDevices.filter(d => {
     const matchSearch = d.hostname.toLowerCase().includes(search.toLowerCase()) ||
-      d.iPAddress.includes(search) ||
+      d.ipAddress.includes(search) ||
       d.assignedUser?.toLowerCase().includes(search.toLowerCase());
     const matchFilter = filter === 'All' || d.status === filter;
     return matchSearch && matchFilter;
@@ -333,7 +333,7 @@ function DevicesPage() {
                 return (
                   <tr key={d.id}>
                     <td><strong>{d.hostname}</strong></td>
-                    <td style={{ fontFamily: 'monospace' }}>{d.iPAddress}</td>
+                    <td style={{ fontFamily: 'monospace' }}>{d.ipAddress}</td>
                     <td>{d.oS}</td>
                     <td><span className={`badge ${badgeClass}`}>{d.status}</span></td>
                     <td><span style={{ color: cpuPct > 85 ? 'var(--accent-red)' : 'var(--text-primary)' }}>{cpuPct.toFixed(1)}%</span></td>

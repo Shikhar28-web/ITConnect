@@ -793,7 +793,7 @@ function RemoteSessionPage() {
         {device && (
           <div style={{ flex: 1 }}>
             <span style={{ fontWeight: 700 }}>{device.hostname}</span>
-            <span style={{ marginLeft: 10, fontSize: 12, color: 'var(--text-muted)' }}>{device.iPAddress}</span>
+            <span style={{ marginLeft: 10, fontSize: 12, color: 'var(--text-muted)' }}>{device.ipAddress}</span>
             {connected
               ? <span className="badge badge-online" style={{ marginLeft: 10 }}>● Connected</span>
               : <span className="badge badge-warning" style={{ marginLeft: 10 }}>⟳ Connecting...</span>

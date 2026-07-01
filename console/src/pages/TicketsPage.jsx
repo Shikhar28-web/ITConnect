@@ -138,7 +138,7 @@ function CreateTicketModal({ onClose, onSave }) {
             >
               <option value="">Select device...</option>
               {allDevices.map(d => (
-                <option key={d.id} value={d.id}>{d.hostname} ({d.iPAddress})</option>
+                <option key={d.id} value={d.id}>{d.hostname} ({d.ipAddress})</option>
               ))}
             </select>
           </div>

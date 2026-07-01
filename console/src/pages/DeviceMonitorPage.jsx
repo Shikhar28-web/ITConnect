@@ -266,7 +266,7 @@ function MonitorTile({ device, onDoubleClick }) {
             RAM {ramPct.toFixed(0)}%
           </span>
           <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>
-            {device.iPAddress}
+            {device.ipAddress}
           </span>
         </div>
       </div>
@@ -442,7 +442,7 @@ function MonitorFocusModal({ focusData, onClose, navigate }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <button className="btn btn-ghost btn-sm" onClick={onClose}>← Back to Wall</button>
             <span style={{ fontWeight: 700, fontSize: 15 }}>{device.hostname}</span>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{device.iPAddress}</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{device.ipAddress}</span>
             <span className={`badge ${badgeClass}`}>● {device.status}</span>
             {streamState === 'connected'
               ? <span className="badge badge-online" style={{ fontSize: 10 }}>🟢 Live</span>
@@ -734,7 +734,7 @@ function GroupManagerDrawer({ groups, allDevices, onGroupsChange, onClose }) {
                       <span className={`status-dot ${device.status.toLowerCase()}`} />
                       <span style={{ flex: 1, fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                         <span style={{ fontWeight: 500 }}>{device.hostname}</span>
-                        <span style={{ fontSize: 11, color: 'var(--accent-blue)', fontFamily: 'monospace' }}>({device.iPAddress})</span>
+                        <span style={{ fontSize: 11, color: 'var(--accent-blue)', fontFamily: 'monospace' }}>({device.ipAddress})</span>
                       </span>
                       {inOtherGroup && (
                         <span style={{ fontSize: 10, color: 'var(--accent-orange)', marginLeft: 4 }}>
@@ -836,7 +836,7 @@ function DeviceMonitorPage() {
 
   const filteredDevices = allDevices.filter(d => {
     const matchFilter = filter === 'All' || d.status === filter || (filter === 'Online' && d.status === 'InSession');
-    const matchSearch = !search || d.hostname.toLowerCase().includes(search.toLowerCase()) || d.iPAddress.includes(search);
+    const matchSearch = !search || d.hostname.toLowerCase().includes(search.toLowerCase()) || d.ipAddress.includes(search);
     return matchFilter && matchSearch;
   });
 
