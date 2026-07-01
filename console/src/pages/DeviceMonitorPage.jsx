@@ -29,7 +29,7 @@ function formatUptime(seconds) {
 }
 
 // ─── Per-device WebRTC stream manager ────────────────────────────────────────
-async function createViewStream(deviceId, onStream, onStateChange) {
+async function createViewStream(deviceId, onStream, onStateChange, onSecureDesktopFrame) {
   const token = localStorage.getItem('accessToken') || '';
 
   const hub = new signalR.HubConnectionBuilder()
@@ -75,9 +75,9 @@ async function createViewStream(deviceId, onStream, onStateChange) {
   hub.on('ActiveDesktop', noop);
   hub.on('activeDesktop', noop);
   hub.on('activedesktop', noop);
-  hub.on('SecureDesktopFrame', noop);
-  hub.on('secureDesktopFrame', noop);
-  hub.on('securedesktopframe', noop);
+  hub.on('SecureDesktopFrame', onSecureDesktopFrame);
+  hub.on('secureDesktopFrame', onSecureDesktopFrame);
+  hub.on('securedesktopframe', onSecureDesktopFrame);
   hub.on('ClipboardData', noop);
   hub.on('clipboardData', noop);
   hub.on('clipboarddata', noop);
@@ -109,6 +109,7 @@ function MonitorTile({ device, onDoubleClick }) {
   const videoRef = useRef(null);
   const hubRef = useRef(null);
   const pcRef = useRef(null);
+  const [secureDesktopFrame, setSecureDesktopFrame] = useState(null);
   const [streamState, setStreamState] = useState('connecting'); // connecting | connected | disconnected | offline
   const [zoom, setZoom] = useState(100);
   const [annotation, setAnnotation] = useState(false);
@@ -139,6 +140,11 @@ function MonitorTile({ device, onDoubleClick }) {
       },
       (state) => {
         if (!cancelled) setStreamState(state);
+      },
+      (base64Frame) => {
+        if (cancelled) return;
+        setSecureDesktopFrame(base64Frame);
+        setStreamState('connected');
       }
     ).then(({ hub, pc }) => {
       if (cancelled) {
@@ -214,14 +220,23 @@ function MonitorTile({ device, onDoubleClick }) {
           </div>
         ) : null}
 
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="monitor-tile-video"
-          style={{ opacity: streamState === 'connected' ? 1 : 0 }}
-        />
+        {secureDesktopFrame ? (
+          <img
+            draggable="false"
+            src={`data:image/jpeg;base64,${secureDesktopFrame}`}
+            className="monitor-tile-video"
+            style={{ width: '100%', height: '100%', objectFit: 'contain', userSelect: 'none', WebkitUserDrag: 'none' }}
+          />
+        ) : (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="monitor-tile-video"
+            style={{ opacity: streamState === 'connected' ? 1 : 0 }}
+          />
+        )}
 
         {/* Annotation canvas */}
         <canvas
