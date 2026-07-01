@@ -191,7 +191,7 @@ function RemoteSessionPage() {
   const [keepAwake, setKeepAwake] = useState(false);
   const [secureDesktopActive, setSecureDesktopActive] = useState(false);
   const [secureDesktopFrame, setSecureDesktopFrame] = useState(null);
-  const [useJpegFallback, setUseJpegFallback] = useState(false);
+  const [useJpegFallback, setUseJpegFallback] = useState(true);
   const [activeDesktopName, setActiveDesktopName] = useState('Default');
   const imgRef = useRef(null);
 
@@ -221,53 +221,37 @@ function RemoteSessionPage() {
   }, [deviceId]);
 
   useEffect(() => {
-    // 1. Connection Timeout Fallback (if WebRTC is stuck connecting for > 5 seconds)
-    const timeout = setTimeout(() => {
-      if (!connected && !useJpegFallback) {
-        console.warn('WebRTC failed to connect within 5 seconds. Automatically falling back to JPEG stream.');
-        setUseJpegFallback(true);
-      }
-    }, 5000);
-
-    // 2. Black Screen Detection (if connected but showing black frames)
-    let checkInterval;
-    if (connected && !secureDesktopActive && !useJpegFallback) {
-      checkInterval = setInterval(() => {
-        if (!videoRef.current) return;
-        try {
-          const video = videoRef.current;
-          if (video.videoWidth === 0 || video.videoHeight === 0) return;
-
-          const canvas = document.createElement('canvas');
-          canvas.width = 16;
-          canvas.height = 16;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) return;
-
-          ctx.drawImage(video, 0, 0, 16, 16);
-          const imgData = ctx.getImageData(0, 0, 16, 16).data;
-
-          let isBlack = true;
-          for (let i = 0; i < imgData.length; i += 4) {
-            if (imgData[i] > 10 || imgData[i+1] > 10 || imgData[i+2] > 10) {
-              isBlack = false;
-              break;
+    // If WebRTC connects and actually gets video, switch off JPEG fallback
+    if (connected && videoRef.current) {
+      const checkInterval = setInterval(() => {
+        const video = videoRef.current;
+        if (!video) return;
+        if (video.videoWidth > 0 && video.videoHeight > 0) {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 16;
+            canvas.height = 16;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, 16, 16);
+            const imgData = ctx.getImageData(0, 0, 16, 16).data;
+            let hasColor = false;
+            for (let i = 0; i < imgData.length; i += 4) {
+              if (imgData[i] > 10 || imgData[i+1] > 10 || imgData[i+2] > 10) {
+                hasColor = true;
+                break;
+              }
             }
-          }
-
-          if (isBlack) {
-            console.warn('WebRTC stream detected as black. Automatically falling back to JPEG stream.');
-            setUseJpegFallback(true);
-          }
-        } catch (e) {}
-      }, 2000);
+            if (hasColor) {
+              console.log('WebRTC has real video — switching off JPEG fallback.');
+              setUseJpegFallback(false);
+              clearInterval(checkInterval);
+            }
+          } catch (e) {}
+        }
+      }, 1000);
+      return () => clearInterval(checkInterval);
     }
-
-    return () => {
-      clearTimeout(timeout);
-      if (checkInterval) clearInterval(checkInterval);
-    };
-  }, [connected, secureDesktopActive, useJpegFallback]);
+  }, [connected]);
 
   useEffect(() => {
     const handleDirListing = (e) => {
@@ -1121,7 +1105,7 @@ function RemoteSessionPage() {
                   SECURE DESKTOP ACTIVE ({activeDesktopName.toUpperCase()})
                 </div>
               )}
-              {(secureDesktopActive || useJpegFallback) && secureDesktopFrame ? (
+              {secureDesktopFrame ? (
                 <img
                   ref={imgRef}
                   src={`data:image/jpeg;base64,${secureDesktopFrame}`}
