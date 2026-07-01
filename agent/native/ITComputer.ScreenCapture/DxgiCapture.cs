@@ -15,6 +15,7 @@ public static class DxgiCapture
     private static int _width;
     private static int _height;
     private static bool _initialized;
+    private static DateTime _nextInitTime = DateTime.MinValue;
 
     [DllImport("d3d11.dll", SetLastError = true)]
     private static extern int D3D11CreateDevice(
@@ -35,6 +36,10 @@ public static class DxgiCapture
         {
             if (!_initialized)
             {
+                if (DateTime.UtcNow < _nextInitTime)
+                {
+                    return null;
+                }
                 Initialize();
             }
 
@@ -42,6 +47,7 @@ public static class DxgiCapture
         }
         catch
         {
+            _nextInitTime = DateTime.UtcNow.AddSeconds(3);
             Reset();
             return null;
         }
