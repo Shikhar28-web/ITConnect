@@ -149,10 +149,40 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await db.Database.EnsureCreatedAsync();
 
-    // Auto-migrate SQLite schema
+    // Auto-migrate SQLite schema safely
     try
     {
-        await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"Location\" TEXT DEFAULT ''");
+        var conn = db.Database.GetDbConnection();
+        var wasClosed = conn.State == System.Data.ConnectionState.Closed;
+        if (wasClosed) await conn.OpenAsync();
+
+        bool hasLocation = false;
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA table_info(\"Users\")";
+            using (var reader = await cmd.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    if (reader.GetString(1) == "Location")
+                    {
+                        hasLocation = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!hasLocation)
+        {
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "ALTER TABLE \"Users\" ADD COLUMN \"Location\" TEXT DEFAULT ''";
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        if (wasClosed) await conn.CloseAsync();
     }
     catch {}
 
