@@ -221,39 +221,52 @@ function RemoteSessionPage() {
   }, [deviceId]);
 
   useEffect(() => {
-    if (!connected || secureDesktopActive || useJpegFallback) return;
+    // 1. Connection Timeout Fallback (if WebRTC is stuck connecting for > 5 seconds)
+    const timeout = setTimeout(() => {
+      if (!connected && !useJpegFallback) {
+        console.warn('WebRTC failed to connect within 5 seconds. Automatically falling back to JPEG stream.');
+        setUseJpegFallback(true);
+      }
+    }, 5000);
 
-    const checkInterval = setInterval(() => {
-      if (!videoRef.current) return;
-      try {
-        const video = videoRef.current;
-        if (video.videoWidth === 0 || video.videoHeight === 0) return;
+    // 2. Black Screen Detection (if connected but showing black frames)
+    let checkInterval;
+    if (connected && !secureDesktopActive && !useJpegFallback) {
+      checkInterval = setInterval(() => {
+        if (!videoRef.current) return;
+        try {
+          const video = videoRef.current;
+          if (video.videoWidth === 0 || video.videoHeight === 0) return;
 
-        const canvas = document.createElement('canvas');
-        canvas.width = 16;
-        canvas.height = 16;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+          const canvas = document.createElement('canvas');
+          canvas.width = 16;
+          canvas.height = 16;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
 
-        ctx.drawImage(video, 0, 0, 16, 16);
-        const imgData = ctx.getImageData(0, 0, 16, 16).data;
+          ctx.drawImage(video, 0, 0, 16, 16);
+          const imgData = ctx.getImageData(0, 0, 16, 16).data;
 
-        let isBlack = true;
-        for (let i = 0; i < imgData.length; i += 4) {
-          if (imgData[i] > 10 || imgData[i+1] > 10 || imgData[i+2] > 10) {
-            isBlack = false;
-            break;
+          let isBlack = true;
+          for (let i = 0; i < imgData.length; i += 4) {
+            if (imgData[i] > 10 || imgData[i+1] > 10 || imgData[i+2] > 10) {
+              isBlack = false;
+              break;
+            }
           }
-        }
 
-        if (isBlack) {
-          console.warn('WebRTC stream detected as black. Automatically falling back to JPEG stream.');
-          setUseJpegFallback(true);
-        }
-      } catch (e) {}
-    }, 2000);
+          if (isBlack) {
+            console.warn('WebRTC stream detected as black. Automatically falling back to JPEG stream.');
+            setUseJpegFallback(true);
+          }
+        } catch (e) {}
+      }, 2000);
+    }
 
-    return () => clearInterval(checkInterval);
+    return () => {
+      clearTimeout(timeout);
+      if (checkInterval) clearInterval(checkInterval);
+    };
   }, [connected, secureDesktopActive, useJpegFallback]);
 
   useEffect(() => {
