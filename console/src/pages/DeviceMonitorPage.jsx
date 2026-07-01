@@ -116,12 +116,29 @@ function MonitorTile({ device, onDoubleClick }) {
   const canvasRef = useRef(null);
   const isDrawing = useRef(false);
   const lastPos = useRef(null);
+  const [inView, setInView] = useState(false);
+  const tileRef = useRef(null);
 
   const cpuPct = device.metrics?.cpuUsage ?? 0;
   const ramPct = device.metrics?.ramTotal > 0
     ? (device.metrics.ramUsage / device.metrics.ramTotal) * 100 : 0;
 
   useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setInView(entry.isIntersecting);
+      },
+      { threshold: 0.05, rootMargin: '100px' }
+    );
+    if (tileRef.current) observer.observe(tileRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!inView) {
+      setStreamState('disconnected');
+      return;
+    }
     if (device.status === 'Offline') {
       setStreamState('offline');
       return;
@@ -163,7 +180,7 @@ function MonitorTile({ device, onDoubleClick }) {
       if (pcRef.current) { try { pcRef.current.close(); } catch (e) {} pcRef.current = null; }
       if (hubRef.current) { try { hubRef.current.stop(); } catch (e) {} hubRef.current = null; }
     };
-  }, [device.id, device.status]);
+  }, [device.id, device.status, inView]);
 
   function startDraw(e) {
     if (!annotation) return;
@@ -197,6 +214,7 @@ function MonitorTile({ device, onDoubleClick }) {
 
   return (
     <div
+      ref={tileRef}
       className="monitor-tile"
       onDoubleClick={() => onDoubleClick({ device, videoRef, hubRef, pcRef })}
       title={`${device.hostname} — Double-click to focus`}
