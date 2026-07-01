@@ -52,6 +52,54 @@ public class DeviceService : IDeviceService
         if (existingByName != null && existingByMac != null && existingByName.Id != existingByMac.Id)
         {
             // Deduplicate (e.g. LAN vs WiFi duplicate registrations). Remove MAC-matched row to avoid unique constraint clash.
+            // Before deleting the MAC-matched device, migrate all related entities to the name-matched device to satisfy foreign key constraints.
+            
+            // 1. Migrate Sessions
+            var sessions = await _db.RemoteSessions.Where(s => s.DeviceId == existingByMac.Id).ToListAsync();
+            foreach (var session in sessions)
+            {
+                session.DeviceId = existingByName.Id;
+            }
+
+            // 2. Migrate Tickets
+            var tickets = await _db.SupportTickets.Where(t => t.DeviceId == existingByMac.Id).ToListAsync();
+            foreach (var ticket in tickets)
+            {
+                ticket.DeviceId = existingByName.Id;
+            }
+
+            // 3. Migrate Software Deployments
+            var deployments = await _db.SoftwareDeployments.Where(d => d.DeviceId == existingByMac.Id).ToListAsync();
+            foreach (var deployment in deployments)
+            {
+                deployment.DeviceId = existingByName.Id;
+            }
+
+            // 4. Migrate Notifications
+            var notifications = await _db.Notifications.Where(n => n.DeviceId == existingByMac.Id).ToListAsync();
+            foreach (var notification in notifications)
+            {
+                notification.DeviceId = existingByName.Id;
+            }
+
+            // 5. Migrate or delete Device Metrics (One-to-One)
+            var macMetrics = await _db.DeviceMetrics.FirstOrDefaultAsync(m => m.DeviceId == existingByMac.Id);
+            if (macMetrics != null)
+            {
+                var nameMetrics = await _db.DeviceMetrics.FirstOrDefaultAsync(m => m.DeviceId == existingByName.Id);
+                if (nameMetrics != null)
+                {
+                    _db.DeviceMetrics.Remove(macMetrics);
+                }
+                else
+                {
+                    macMetrics.DeviceId = existingByName.Id;
+                }
+            }
+
+            await _db.SaveChangesAsync();
+
+            // Now we can safely remove the MAC-matched device
             _db.Devices.Remove(existingByMac);
             await _db.SaveChangesAsync();
         }
