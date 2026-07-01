@@ -596,6 +596,7 @@ function GroupManagerDrawer({ groups, allDevices, onGroupsChange, onClose }) {
   const [newGroupName, setNewGroupName] = useState('');
   const [editingGroup, setEditingGroup] = useState(null); // group id being edited
   const [editingName, setEditingName] = useState('');
+  const [deviceSearch, setDeviceSearch] = useState('');
 
   function createGroup() {
     const name = newGroupName.trim();
@@ -666,6 +667,17 @@ function GroupManagerDrawer({ groups, allDevices, onGroupsChange, onClose }) {
           <button className="btn btn-primary btn-sm" onClick={createGroup}>+ Create</button>
         </div>
 
+        {/* Search devices */}
+        <div style={{ padding: '12px 20px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <input
+            className="form-input"
+            placeholder="🔍 Search devices by name or IP..."
+            value={deviceSearch}
+            onChange={e => setDeviceSearch(e.target.value)}
+            style={{ width: '100%', fontSize: 13 }}
+          />
+        </div>
+
         {/* Groups list */}
         <div className="group-manager-list">
           {groups.length === 0 && (
@@ -716,9 +728,16 @@ function GroupManagerDrawer({ groups, allDevices, onGroupsChange, onClose }) {
 
               {/* Device assignment checkboxes */}
               <div className="group-device-list">
-                {allDevices.map(device => {
-                  const inThisGroup = group.deviceIds.includes(device.id);
-                  const inOtherGroup = !inThisGroup && !!getGroupForDevice(device.id);
+                {allDevices
+                  .filter(device => {
+                    const q = deviceSearch.toLowerCase().trim();
+                    return !q || 
+                      device.hostname.toLowerCase().includes(q) || 
+                      device.ipAddress.includes(q);
+                  })
+                  .map(device => {
+                    const inThisGroup = group.deviceIds.includes(device.id);
+                    const inOtherGroup = !inThisGroup && !!getGroupForDevice(device.id);
                   return (
                     <label
                       key={device.id}
