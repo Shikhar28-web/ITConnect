@@ -113,6 +113,7 @@ public record DeviceMetricsUpdate(
 
 public record SessionDto(
     int Id,
+    int DeviceId,
     string EngineerName,
     string DeviceHostname,
     string DeviceIP,

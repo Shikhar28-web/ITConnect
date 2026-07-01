@@ -304,26 +304,48 @@ public class ReportService : IReportService
             from, to));
     }
 
-    public async Task<DashboardStats> GetDashboardStatsAsync()
+    public async Task<DashboardStats> GetDashboardStatsAsync(HashSet<int>? allowedDeviceIds)
     {
-        var totalDevices = await _db.Devices.CountAsync();
-        var onlineDevices = await _db.Devices.CountAsync(d =>
+        IQueryable<Device> devicesQuery = _db.Devices;
+        IQueryable<RemoteSession> sessionsQuery = _db.RemoteSessions;
+        IQueryable<SupportTicket> ticketsQuery = _db.SupportTickets;
+        IQueryable<DeviceMetrics> metricsQuery = _db.DeviceMetrics;
+
+        if (allowedDeviceIds != null)
+        {
+            devicesQuery = devicesQuery.Where(d => allowedDeviceIds.Contains(d.Id));
+            sessionsQuery = sessionsQuery.Where(s => allowedDeviceIds.Contains(s.DeviceId));
+            ticketsQuery = ticketsQuery.Where(t => allowedDeviceIds.Contains(t.DeviceId));
+            metricsQuery = metricsQuery.Where(m => allowedDeviceIds.Contains(m.DeviceId));
+        }
+
+        var totalDevices = await devicesQuery.CountAsync();
+        var onlineDevices = await devicesQuery.CountAsync(d =>
             d.Status == DeviceStatus.Online || d.Status == DeviceStatus.InSession);
         var offlineDevices = totalDevices - onlineDevices;
-        var activeSessions = await _db.RemoteSessions.CountAsync(s =>
+        var activeSessions = await sessionsQuery.CountAsync(s =>
             s.Status == SessionStatus.Active || s.Status == SessionStatus.Connecting);
-        var openTickets = await _db.SupportTickets.CountAsync(t =>
+        var openTickets = await ticketsQuery.CountAsync(t =>
             t.Status == TicketStatus.Open || t.Status == TicketStatus.InProgress);
-        var criticalTickets = await _db.SupportTickets.CountAsync(t =>
+        var criticalTickets = await ticketsQuery.CountAsync(t =>
             t.Priority == TicketPriority.Critical && t.Status != TicketStatus.Resolved);
 
-        var avgCpu = await _db.DeviceMetrics.AnyAsync()
-            ? await _db.DeviceMetrics.AverageAsync(m => m.CpuUsage) : 0;
-        var avgRam = await _db.DeviceMetrics.AnyAsync()
-            ? await _db.DeviceMetrics.AverageAsync(m => m.RamUsage / m.RamTotal * 100) : 0;
+        var avgCpu = await metricsQuery.AnyAsync()
+            ? await metricsQuery.AverageAsync(m => m.CpuUsage) : 0;
+        var avgRam = await metricsQuery.AnyAsync()
+            ? await metricsQuery.AverageAsync(m => m.RamUsage / m.RamTotal * 100) : 0;
 
         var recentOnline = await _deviceService.GetOnlineDevicesAsync();
+        if (allowedDeviceIds != null)
+        {
+            recentOnline = recentOnline.Where(d => allowedDeviceIds.Contains(d.Id));
+        }
+
         var activeSessionsList = await _sessionService.GetActiveSessionsAsync();
+        if (allowedDeviceIds != null)
+        {
+            activeSessionsList = activeSessionsList.Where(s => allowedDeviceIds.Contains(s.DeviceId));
+        }
 
         return new DashboardStats(
             totalDevices, onlineDevices, offlineDevices,

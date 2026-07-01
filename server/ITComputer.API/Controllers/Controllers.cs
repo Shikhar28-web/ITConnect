@@ -305,11 +305,51 @@ public class AuditLogsController : ControllerBase
 public class ReportsController : ControllerBase
 {
     private readonly IReportService _reports;
+    private readonly AppDbContext _db;
 
-    public ReportsController(IReportService reports) => _reports = reports;
+    public ReportsController(IReportService reports, AppDbContext db)
+    {
+        _reports = reports;
+        _db = db;
+    }
+
+    private async Task<HashSet<int>> GetAllowedDeviceIdsAsync()
+    {
+        var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? "";
+
+        if (role == "SuperAdmin")
+        {
+            return null;
+        }
+
+        var allowedDeviceIds = new HashSet<int>();
+        var groups = await _db.DeviceGroups.ToListAsync();
+        foreach (var g in groups)
+        {
+            try
+            {
+                var allowedUsers = System.Text.Json.JsonSerializer.Deserialize<List<int>>(g.AllowedUserIds) ?? new List<int>();
+                if (allowedUsers.Contains(userId))
+                {
+                    var deviceIds = System.Text.Json.JsonSerializer.Deserialize<List<int>>(g.DeviceIds) ?? new List<int>();
+                    foreach (var id in deviceIds)
+                    {
+                        allowedDeviceIds.Add(id);
+                    }
+                }
+            }
+            catch {}
+        }
+        return allowedDeviceIds;
+    }
 
     [HttpGet("dashboard")]
-    public async Task<IActionResult> Dashboard() => Ok(await _reports.GetDashboardStatsAsync());
+    public async Task<IActionResult> Dashboard()
+    {
+        var allowed = await GetAllowedDeviceIdsAsync();
+        return Ok(await _reports.GetDashboardStatsAsync(allowed));
+    }
 
     [HttpGet("engineer-performance")]
     public async Task<IActionResult> EngineerPerformance(

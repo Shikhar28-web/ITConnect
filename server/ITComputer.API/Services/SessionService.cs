@@ -174,6 +174,7 @@ public class SessionService : ISessionService
 
     private static SessionDto MapDto(RemoteSession s, User? engineer, Device device) => new(
         s.Id,
+        s.DeviceId,
         engineer?.FullName ?? "Unknown",
         device.Hostname,
         device.IPAddress,

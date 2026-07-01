@@ -97,5 +97,5 @@ public interface IReportService
 {
     Task<IEnumerable<EngineerPerformanceReport>> GetEngineerPerformanceReportAsync(DateTime from, DateTime to);
     Task<IEnumerable<DeviceHealthReport>> GetDeviceHealthReportAsync(DateTime from, DateTime to);
-    Task<DashboardStats> GetDashboardStatsAsync();
+    Task<DashboardStats> GetDashboardStatsAsync(HashSet<int>? allowedDeviceIds);
 }
