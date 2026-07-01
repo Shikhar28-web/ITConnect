@@ -474,7 +474,7 @@ function connectServicePipe() {
     if (!servicePipeConnected) {
       console.log('Connected to Windows Service Named Pipe.');
       servicePipeConnected = true;
-      stopLocalSecureDesktopHelper();
+      // stopLocalSecureDesktopHelper();
     }
   });
 
