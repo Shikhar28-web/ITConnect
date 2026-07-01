@@ -497,7 +497,15 @@ function RemoteSessionPage() {
             setSecureDesktopActive(true);
           } else {
             setSecureDesktopActive(false);
-            setSecureDesktopFrame(null);
+            // Debounce clearing the secure desktop frame by 1.5 seconds to prevent black flickering during rapid logon desktop handshakes
+            setTimeout(() => {
+              setActiveDesktopName(current => {
+                if (current === 'Default' || current === 'unknown') {
+                  setSecureDesktopFrame(null);
+                }
+                return current;
+              });
+            }, 1500);
           }
         }
       });
