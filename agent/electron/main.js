@@ -1058,45 +1058,16 @@ function updateTrayStatus(status) {
 }
 
 // ─── Metrics Reporter ─────────────────────────────────────────────────────────
-function getDiskUsage() {
-  return new Promise((resolve) => {
-    exec('powershell -Command "(Get-Volume -DriveLetter C).Size, (Get-Volume -DriveLetter C).SizeRemaining"', (error, stdout) => {
-      if (error) {
-        resolve({ usage: 0, total: 0 });
-        return;
-      }
-      const lines = stdout.trim().split(/\r?\n/);
-      if (lines.length >= 2) {
-        const totalBytes = parseInt(lines[0], 10);
-        const freeBytes = parseInt(lines[1], 10);
-        if (!isNaN(totalBytes) && !isNaN(freeBytes) && totalBytes > 0) {
-          const usedBytes = totalBytes - freeBytes;
-          const totalGB = totalBytes / 1024 / 1024 / 1024;
-          const usedGB = usedBytes / 1024 / 1024 / 1024;
-          resolve({ usage: usedGB, total: totalGB });
-          return;
-        }
-      }
-      resolve({ usage: 0, total: 0 });
-    });
-  });
-}
-
 function startMetricsReporter() {
   setInterval(async () => {
     if (!deviceId) return;
 
-    const disk = await getDiskUsage();
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-    const usedMem = totalMem - freeMem;
-
     const metrics = {
       cpuUsage: await getCPUUsage(),
-      ramUsage: usedMem / 1024 / 1024,
-      ramTotal: totalMem / 1024 / 1024,
-      diskUsage: disk.usage,
-      diskTotal: disk.total,
+      ramUsage: process.memoryUsage().rss / 1024 / 1024,
+      ramTotal: os.totalmem() / 1024 / 1024,
+      diskUsage: 0,
+      diskTotal: 0,
       cpuModel: os.cpus()[0]?.model || 'Unknown',
       logicalCores: os.cpus().length,
       uptimeSeconds: Math.floor(os.uptime()),
