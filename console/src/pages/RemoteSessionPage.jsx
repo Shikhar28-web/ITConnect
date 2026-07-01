@@ -1113,37 +1113,34 @@ function RemoteSessionPage() {
                   SECURE DESKTOP ACTIVE ({activeDesktopName.toUpperCase()})
                 </div>
               )}
-              {secureDesktopFrame ? (
-                <img
-                  ref={imgRef}
-                  draggable="false"
-                  src={`data:image/jpeg;base64,${secureDesktopFrame}`}
-                  className="viewer-canvas"
-                  style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none', userSelect: 'none', WebkitUserDrag: 'none' }}
-                  onMouseMove={handleMouseMove}
-                  onMouseDown={handleMouseDown}
-                  onMouseUp={handleMouseUp}
+              <img
+                ref={imgRef}
+                draggable="false"
+                src={secureDesktopFrame ? `data:image/jpeg;base64,${secureDesktopFrame}` : 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=='}
+                className="viewer-canvas"
+                style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none', userSelect: 'none', WebkitUserDrag: 'none', display: secureDesktopFrame ? 'block' : 'none', position: 'absolute', top: 0, left: 0 }}
+                onMouseMove={handleMouseMove}
+                onMouseDown={handleMouseDown}
+                onMouseUp={handleMouseUp}
+                onWheel={handleWheel}
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+                onContextMenu={(e) => { e.preventDefault(); }}
+              />
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                className="viewer-canvas"
+                style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none', display: secureDesktopFrame ? 'none' : 'block', position: 'absolute', top: 0, left: 0 }}
+                onMouseMove={handleMouseMove}
+                onMouseDown={handleMouseDown}
+                onMouseUp={handleMouseUp}
                   onWheel={handleWheel}
                   onDragOver={handleDragOver}
                   onDrop={handleDrop}
                   onContextMenu={(e) => { e.preventDefault(); }}
                 />
-              ) : (
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  className="viewer-canvas"
-                  style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none' }}
-                  onMouseMove={handleMouseMove}
-                  onMouseDown={handleMouseDown}
-                  onMouseUp={handleMouseUp}
-                  onWheel={handleWheel}
-                  onDragOver={handleDragOver}
-                  onDrop={handleDrop}
-                  onContextMenu={(e) => { e.preventDefault(); }}
-                />
-              )}
               <canvas
                 ref={canvasRef}
                 className={`annotation-canvas ${annotation ? 'active' : ''}`}
