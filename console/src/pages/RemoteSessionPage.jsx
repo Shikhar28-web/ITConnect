@@ -1158,7 +1158,7 @@ function RemoteSessionPage() {
                 autoPlay
                 playsInline
                 className="viewer-canvas"
-                style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none', display: secureDesktopFrame ? 'none' : 'block', position: 'absolute', top: 0, left: 0 }}
+                style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none', display: hasSecureFrame ? 'none' : 'block', position: 'absolute', top: 0, left: 0 }}
                 onMouseMove={handleMouseMove}
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
