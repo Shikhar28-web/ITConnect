@@ -190,11 +190,9 @@ function RemoteSessionPage() {
   const [customLaunchInput, setCustomLaunchInput] = useState('');
   const [keepAwake, setKeepAwake] = useState(false);
   const [secureDesktopActive, setSecureDesktopActive] = useState(false);
-  const [hasSecureFrame, setHasSecureFrame] = useState(false);
-  const hasSecureFrameRef = useRef(false); // ref mirror so callbacks don't stale-close over state
+  const [secureDesktopFrame, setSecureDesktopFrame] = useState(null);
   const [useJpegFallback, setUseJpegFallback] = useState(true);
   const [activeDesktopName, setActiveDesktopName] = useState('Default');
-  const secureDesktopCanvasRef = useRef(null);
   const imgRef = useRef(null);
 
   const videoRef = useRef(null);
@@ -475,25 +473,7 @@ function RemoteSessionPage() {
           setTransferringFile(null);
         },
         onSecureDesktopFrame: (base64Frame) => {
-          // Draw directly to canvas — NO React state update, no re-render, no flicker
-          const canvas = secureDesktopCanvasRef.current;
-          if (canvas) {
-            const img = new Image();
-            img.onload = () => {
-              if (canvas.width !== img.width || canvas.height !== img.height) {
-                canvas.width = img.width;
-                canvas.height = img.height;
-              }
-              const ctx = canvas.getContext('2d', { alpha: false });
-              ctx.drawImage(img, 0, 0);
-            };
-            img.src = `data:image/jpeg;base64,${base64Frame}`;
-          }
-          // Only trigger a React re-render the FIRST time (to flip display)
-          if (!hasSecureFrameRef.current) {
-            hasSecureFrameRef.current = true;
-            setHasSecureFrame(true);
-          }
+          setSecureDesktopFrame(base64Frame);
         },
         onActiveDesktop: (desktopName) => {
           const sessionEvents = {
@@ -517,18 +497,12 @@ function RemoteSessionPage() {
             setSecureDesktopActive(true);
           } else {
             setSecureDesktopActive(false);
-            // Debounce clearing the secure desktop canvas by 3s to cover DXGI reset window
+            // Debounce clearing the secure desktop frame by 3 seconds to cover the DXGI 3-second reset cooldown
+            // This prevents black flickering during rapid logon desktop handshakes (Winlogon <-> Default switches)
             setTimeout(() => {
               setActiveDesktopName(current => {
                 if (current === 'Default' || current === 'unknown') {
-                  hasSecureFrameRef.current = false;
-                  setHasSecureFrame(false);
-                  // Clear canvas so stale lock-screen doesn't flash if reopened quickly
-                  const canvas = secureDesktopCanvasRef.current;
-                  if (canvas) {
-                    const ctx = canvas.getContext('2d', { alpha: false });
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                  }
+                  setSecureDesktopFrame(null);
                 }
                 return current;
               });
@@ -1140,11 +1114,12 @@ function RemoteSessionPage() {
                   SECURE DESKTOP ACTIVE ({activeDesktopName.toUpperCase()})
                 </div>
               )}
-              <canvas
-                ref={secureDesktopCanvasRef}
+              <img
+                ref={imgRef}
                 draggable="false"
+                src={secureDesktopFrame ? `data:image/jpeg;base64,${secureDesktopFrame}` : 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=='}
                 className="viewer-canvas"
-                style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none', userSelect: 'none', display: hasSecureFrame ? 'block' : 'none', position: 'absolute', top: 0, left: 0 }}
+                style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none', userSelect: 'none', WebkitUserDrag: 'none', display: secureDesktopFrame ? 'block' : 'none', position: 'absolute', top: 0, left: 0 }}
                 onMouseMove={handleMouseMove}
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
@@ -1158,7 +1133,7 @@ function RemoteSessionPage() {
                 autoPlay
                 playsInline
                 className="viewer-canvas"
-                style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none', display: hasSecureFrame ? 'none' : 'block', position: 'absolute', top: 0, left: 0 }}
+                style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none', display: secureDesktopFrame ? 'none' : 'block', position: 'absolute', top: 0, left: 0 }}
                 onMouseMove={handleMouseMove}
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
@@ -1178,7 +1153,7 @@ function RemoteSessionPage() {
                 onMouseUp={stopDraw}
                 onMouseLeave={stopDraw}
               />
-              {!connected && !secureDesktopActive && !hasSecureFrame && (
+              {!connected && !secureDesktopActive && !secureDesktopFrame && (
                 <div style={{
                   position: 'absolute', inset: 0, display: 'flex',
                   flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
