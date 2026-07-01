@@ -1108,9 +1108,10 @@ function RemoteSessionPage() {
               {secureDesktopFrame ? (
                 <img
                   ref={imgRef}
+                  draggable="false"
                   src={`data:image/jpeg;base64,${secureDesktopFrame}`}
                   className="viewer-canvas"
-                  style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none' }}
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `scale(${zoom / 100})`, cursor: 'none', userSelect: 'none', WebkitUserDrag: 'none' }}
                   onMouseMove={handleMouseMove}
                   onMouseDown={handleMouseDown}
                   onMouseUp={handleMouseUp}
