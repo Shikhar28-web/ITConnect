@@ -191,7 +191,7 @@ function RemoteSessionPage() {
   const [keepAwake, setKeepAwake] = useState(false);
   const [secureDesktopActive, setSecureDesktopActive] = useState(false);
   const [secureDesktopFrame, setSecureDesktopFrame] = useState(null);
-  const [useJpegFallback, setUseJpegFallback] = useState(true);
+  const [useJpegFallback, setUseJpegFallback] = useState(false);
   const [activeDesktopName, setActiveDesktopName] = useState('Default');
   const imgRef = useRef(null);
 
@@ -219,6 +219,42 @@ function RemoteSessionPage() {
       initialized.current = false;
     };
   }, [deviceId]);
+
+  useEffect(() => {
+    if (!connected || secureDesktopActive || useJpegFallback) return;
+
+    const checkInterval = setInterval(() => {
+      if (!videoRef.current) return;
+      try {
+        const video = videoRef.current;
+        if (video.videoWidth === 0 || video.videoHeight === 0) return;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 16;
+        canvas.height = 16;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        ctx.drawImage(video, 0, 0, 16, 16);
+        const imgData = ctx.getImageData(0, 0, 16, 16).data;
+
+        let isBlack = true;
+        for (let i = 0; i < imgData.length; i += 4) {
+          if (imgData[i] > 10 || imgData[i+1] > 10 || imgData[i+2] > 10) {
+            isBlack = false;
+            break;
+          }
+        }
+
+        if (isBlack) {
+          console.warn('WebRTC stream detected as black. Automatically falling back to JPEG stream.');
+          setUseJpegFallback(true);
+        }
+      } catch (e) {}
+    }, 2000);
+
+    return () => clearInterval(checkInterval);
+  }, [connected, secureDesktopActive, useJpegFallback]);
 
   useEffect(() => {
     const handleDirListing = (e) => {
@@ -487,6 +523,7 @@ function RemoteSessionPage() {
   }
 
   async function handleReconnect() {
+    setUseJpegFallback(false);
     toast.info('Reconnecting remote stream...');
     try {
       await startPeerConnection();
@@ -1071,7 +1108,7 @@ function RemoteSessionPage() {
                   SECURE DESKTOP ACTIVE ({activeDesktopName.toUpperCase()})
                 </div>
               )}
-              {(secureDesktopActive || (!connected && useJpegFallback)) && secureDesktopFrame ? (
+              {(secureDesktopActive || useJpegFallback) && secureDesktopFrame ? (
                 <img
                   ref={imgRef}
                   src={`data:image/jpeg;base64,${secureDesktopFrame}`}
