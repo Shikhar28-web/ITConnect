@@ -109,7 +109,9 @@ function MonitorTile({ device, onDoubleClick }) {
   const videoRef = useRef(null);
   const hubRef = useRef(null);
   const pcRef = useRef(null);
-  const [secureDesktopFrame, setSecureDesktopFrame] = useState(null);
+  const [hasSecureFrame, setHasSecureFrame] = useState(false);
+  const hasSecureFrameRef = useRef(false);
+  const secureCanvasRef = useRef(null);
   const [streamState, setStreamState] = useState('connecting'); // connecting | connected | disconnected | offline
   const [zoom, setZoom] = useState(100);
   const [annotation, setAnnotation] = useState(false);
@@ -160,7 +162,24 @@ function MonitorTile({ device, onDoubleClick }) {
       },
       (base64Frame) => {
         if (cancelled) return;
-        setSecureDesktopFrame(base64Frame);
+        // Draw directly to canvas — no React state update on every frame
+        const canvas = secureCanvasRef.current;
+        if (canvas) {
+          const img = new Image();
+          img.onload = () => {
+            if (canvas.width !== img.width || canvas.height !== img.height) {
+              canvas.width = img.width;
+              canvas.height = img.height;
+            }
+            const ctx = canvas.getContext('2d', { alpha: false });
+            ctx.drawImage(img, 0, 0);
+          };
+          img.src = `data:image/jpeg;base64,${base64Frame}`;
+        }
+        if (!hasSecureFrameRef.current) {
+          hasSecureFrameRef.current = true;
+          setHasSecureFrame(true);
+        }
         setStreamState('connected');
       }
     ).then(({ hub, pc }) => {
@@ -238,12 +257,12 @@ function MonitorTile({ device, onDoubleClick }) {
           </div>
         ) : null}
 
-        {secureDesktopFrame ? (
-          <img
+        {hasSecureFrame ? (
+          <canvas
+            ref={secureCanvasRef}
             draggable="false"
-            src={`data:image/jpeg;base64,${secureDesktopFrame}`}
             className="monitor-tile-video"
-            style={{ width: '100%', height: '100%', objectFit: 'contain', userSelect: 'none', WebkitUserDrag: 'none' }}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', userSelect: 'none' }}
           />
         ) : (
           <video
